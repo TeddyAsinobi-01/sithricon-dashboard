@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri Fresh Juice - Merchandiser Login</title>
+<link rel="stylesheet" href="shared/style.css">
+<link rel="manifest" href="manifest.json">
+</head>
+<body>
+<header class="app-header">
+  <h1><span class="logo-mark">Ithri</span> Merchandiser</h1>
+</header>
+
+<div class="container">
+  <div class="card">
+    <h2>Select Your Location</h2>
+    <p style="color:var(--gray); font-size:0.85rem; margin-bottom:14px;">
+      Tap your supermarket location below to log in.
+    </p>
+    <div id="locationList" class="location-list">
+      <div class="empty-state">Loading locations...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Password Modal -->
+<div id="passwordModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3 id="modalLocationName">Location</h3>
+    <p style="color:var(--gray); font-size:0.85rem; margin-bottom:14px;">Enter your password to continue</p>
+    <input type="password" id="passwordInput" placeholder="Password" autocomplete="off">
+    <div id="loginError" class="alert error hidden">Incorrect password. Try again.</div>
+    <div class="flex">
+      <button class="btn outline" onclick="closeModal()">Cancel</button>
+      <button class="btn yellow" onclick="attemptLogin()">Login</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script src="app.js"></script>
+<script>
+let selectedLocation = null;
+
+async function loadLocations() {
+  const listEl = document.getElementById('locationList');
+  try {
+    const snap = await db.collection('locations').orderBy('name').get();
+    if (snap.empty) {
+      listEl.innerHTML = '<div class="empty-state">No locations have been added yet. Contact your admin.</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    snap.forEach(doc => {
+      const data = doc.data();
+      const item = document.createElement('div');
+      item.className = 'location-item';
+      item.innerHTML = `<span>${data.name}</span><span class="badge yellow">Login</span>`;
+      item.onclick = () => openModal(doc.id, data);
+      listEl.appendChild(item);
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="alert error">Could not load locations. Check connection.</div>';
+    console.error(e);
+  }
+}
+
+function openModal(id, data) {
+  selectedLocation = { id, ...data };
+  document.getElementById('modalLocationName').textContent = data.name;
+  document.getElementById('passwordInput').value = '';
+  document.getElementById('loginError').classList.add('hidden');
+  document.getElementById('passwordModal').classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('passwordModal').classList.add('hidden');
+}
+
+async function attemptLogin() {
+  const entered = document.getElementById('passwordInput').value.trim();
+  // Default password is "impu" until admin sets it to merchandiser's first+second name
+  const correctPassword = selectedLocation.password || 'impu';
+
+  if (entered.toLowerCase() === correctPassword.toLowerCase()) {
+    setSession(selectedLocation.id, selectedLocation.name);
+
+    // Check if off-days have been set; if not, redirect to off-days setup first
+    if (!selectedLocation.offDays || selectedLocation.offDays.length === 0) {
+      window.location.href = 'off-days.html';
+    } else {
+      window.location.href = 'dashboard-merch.html';
+    }
+  } else {
+    document.getElementById('loginError').classList.remove('hidden');
+  }
+}
+
+document.getElementById('passwordInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') attemptLogin();
+});
+
+loadLocations();
+</script>
+</body>
+</html>

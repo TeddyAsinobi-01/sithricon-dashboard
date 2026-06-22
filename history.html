@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri - My History</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body class="has-bottom-nav">
+<header class="app-header">
+  <h1><span class="logo-mark">Ithri</span> My History</h1>
+  <span style="font-size:0.8rem; cursor:pointer;" onclick="window.location.href='dashboard.html'">Home</span>
+</header>
+
+<div class="container">
+  <div id="historyList" class="card">
+    <p>Loading...</p>
+  </div>
+</div>
+
+<div class="bottom-nav">
+  <a href="dashboard.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">🏠</span>Home</div></a>
+  <a href="stock.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">📦</span>Stock</div></a>
+  <div class="nav-item active"><span class="icon">📋</span>History</div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script>
+const session = getSession();
+if (!session.locationId) window.location.href = 'index.html';
+
+async function init() {
+  const snap = await db.collection('locations').doc(session.locationId)
+    .collection('logs').orderBy('date', 'desc').limit(14).get();
+
+  const listEl = document.getElementById('historyList');
+
+  if (snap.empty) {
+    listEl.innerHTML = '<div class="empty-state">No records yet.</div>';
+    return;
+  }
+
+  listEl.innerHTML = '<h2>Last 14 Days</h2>';
+
+  snap.forEach(doc => {
+    const d = doc.data();
+    let statusBadge = '<span class="badge gray">Pending</span>';
+    if (d.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
+    if (d.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
+
+    listEl.innerHTML += `
+      <div style="padding:10px 0; border-bottom:1px solid var(--light-gray);">
+        <div class="flex-between">
+          <strong>${d.date}</strong> ${statusBadge}
+        </div>
+        <div style="font-size:0.85rem; color:var(--gray); margin-top:4px;">
+          Clock In: ${d.clockIn || '-'} | Clock Out: ${d.clockOut || '-'}
+        </div>
+        ${d.discrepancyReason ? `<div style="font-size:0.85rem; margin-top:4px;"><em>Reason: ${d.discrepancyReason}</em></div>` : ''}
+      </div>`;
+  });
+}
+
+init();
+</script>
+</body>
+</html>

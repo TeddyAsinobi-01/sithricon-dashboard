@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri - Set Off Days</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1><span class="logo-mark">Ithri</span> Merchandiser</h1>
+</header>
+
+<div class="container">
+  <div class="card">
+    <h2>Welcome!</h2>
+    <p style="color:var(--gray); font-size:0.9rem; margin-bottom:16px;">
+      Before you start, please select the day(s) of the week you usually do
+      <strong>not</strong> work. On these days, you won't be required to clock in or report sales.
+      You can ask your admin to change this later if needed.
+    </p>
+
+    <div class="checkbox-grid">
+      <label class="checkbox-item" data-day="0">
+        <input type="checkbox" value="0"> Sunday
+      </label>
+      <label class="checkbox-item" data-day="1">
+        <input type="checkbox" value="1"> Monday
+      </label>
+      <label class="checkbox-item" data-day="2">
+        <input type="checkbox" value="2"> Tuesday
+      </label>
+      <label class="checkbox-item" data-day="3">
+        <input type="checkbox" value="3"> Wednesday
+      </label>
+      <label class="checkbox-item" data-day="4">
+        <input type="checkbox" value="4"> Thursday
+      </label>
+      <label class="checkbox-item" data-day="5">
+        <input type="checkbox" value="5"> Friday
+      </label>
+      <label class="checkbox-item" data-day="6">
+        <input type="checkbox" value="6"> Saturday
+      </label>
+    </div>
+
+    <div id="errorMsg" class="alert error hidden">Please select at least one option (or none if you work every day).</div>
+
+    <button class="btn yellow" onclick="saveOffDays()">Continue to Dashboard</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script>
+const session = getSession();
+if (!session.locationId) window.location.href = 'index.html';
+
+// Visual toggle for checkbox items
+document.querySelectorAll('.checkbox-item').forEach(item => {
+  item.addEventListener('click', () => {
+    setTimeout(() => {
+      const checked = item.querySelector('input').checked;
+      item.classList.toggle('checked', checked);
+    }, 0);
+  });
+});
+
+async function saveOffDays() {
+  const checked = [...document.querySelectorAll('.checkbox-grid input:checked')]
+    .map(cb => parseInt(cb.value));
+
+  try {
+    await db.collection('locations').doc(session.locationId).update({
+      offDays: checked, // can be empty array = works every day
+      offDaysSetAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    window.location.href = 'dashboard.html';
+  } catch (e) {
+    document.getElementById('errorMsg').textContent = 'Could not save. Check your connection and try again.';
+    document.getElementById('errorMsg').classList.remove('hidden');
+    console.error(e);
+  }
+}
+</script>
+</body>
+</html>

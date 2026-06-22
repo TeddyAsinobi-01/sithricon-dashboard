@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri - Stock & Sales</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body class="has-bottom-nav">
+<header class="app-header">
+  <h1><span class="logo-mark">Ithri</span> Stock & Sales</h1>
+  <span style="font-size:0.8rem; cursor:pointer;" onclick="window.location.href='dashboard.html'">Home</span>
+</header>
+
+<div class="container">
+
+  <div id="loadingMsg" class="card"><p>Loading today's products...</p></div>
+
+  <div id="mainContent" class="hidden">
+
+    <div class="card">
+      <h2>Opening Stock (Set by Admin)</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        This is the stock supplied to you for today, as entered by the admin.
+      </p>
+      <div id="openingStockList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Enter Closing Stock</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Count what is left at the end of the day for each product.
+      </p>
+      <div id="closingStockInputs"></div>
+    </div>
+
+    <div class="card">
+      <h2>Enter Total Sold</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Enter how many of each product you sold today.
+      </p>
+      <div id="soldInputs"></div>
+    </div>
+
+    <button class="btn yellow" onclick="calculateAndSubmit()">Calculate & Submit</button>
+
+    <!-- Discrepancy section, shown only if mismatch found -->
+    <div id="discrepancyCard" class="card hidden" style="border:2px solid var(--red); margin-top:16px;">
+      <h2 style="color:var(--red);">⚠️ Discrepancy Detected</h2>
+      <div id="discrepancyDetails"></div>
+      <label style="margin-top:10px;">Please explain the reason</label>
+      <textarea id="discrepancyReason" rows="3" placeholder="e.g. 3 bottles sold while I was at lunch, 1 bottle leaked..."></textarea>
+      <button class="btn danger" onclick="submitWithReason()">Submit Explanation</button>
+    </div>
+
+    <div id="successMsg" class="alert success hidden" style="margin-top:16px;">
+      ✅ Your stock and sales report has been submitted to the admin.
+    </div>
+
+  </div>
+
+</div>
+
+<div class="bottom-nav">
+  <a href="dashboard.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">🏠</span>Home</div></a>
+  <div class="nav-item active"><span class="icon">📦</span>Stock</div>
+  <a href="history.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">📋</span>History</div></a>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script>
+const session = getSession();
+if (!session.locationId) window.location.href = 'index.html';
+
+const today = todayStr();
+let openingStock = {};
+let calculatedDiscrepancy = null;
+let calculatedData = null;
+
+async function init() {
+  const locDoc = await db.collection('locations').doc(session.locationId).get();
+  const locationData = locDoc.data();
+  openingStock = locationData.products || {};
+
+  if (Object.keys(openingStock).length === 0) {
+    document.getElementById('loadingMsg').innerHTML =
+      '<div class="alert warn">No products have been supplied to you yet by the admin.</div>';
+    return;
+  }
+
+  // Check if already submitted today
+  const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
+  const logDoc = await logRef.get();
+  const logData = logDoc.exists ? logDoc.data() : {};
+
+  if (logData.status === 'submitted' || logData.status === 'flagged') {
+    document.getElementById('loadingMsg').innerHTML =
+      '<div class="alert success">✅ You have already submitted your stock report for today. Thank you!</div>';
+    return;
+  }
+
+  renderForms();
+  document.getElementById('loadingMsg').classList.add('hidden');
+  document.getElementById('mainContent').classList.remove('hidden');
+}
+
+function renderForms() {
+  const openingList = document.getElementById('openingStockList');
+  const closingInputs = document.getElementById('closingStockInputs');
+  const soldInputsEl = document.getElementById('soldInputs');
+
+  for (const [product, qty] of Object.entries(openingStock)) {
+    openingList.innerHTML += `
+      <div class="flex-between" style="padding:8px 0; border-bottom:1px solid var(--light-gray);">
+        <span>${product}</span><strong>${qty} units</strong>
+      </div>`;
+
+    closingInputs.innerHTML += `
+      <label>${product} - units remaining</label>
+      <input type="number" min="0" id="closing_${sanitize(product)}" placeholder="0">`;
+
+    soldInputsEl.innerHTML += `
+      <label>${product} - units sold</label>
+      <input type="number" min="0" id="sold_${sanitize(product)}" placeholder="0">`;
+  }
+}
+
+function sanitize(s) {
+  return s.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function calculateAndSubmit() {
+  const closingStock = {};
+  const soldQty = {};
+  const discrepancies = {};
+  let hasDiscrepancy = false;
+
+  for (const product of Object.keys(openingStock)) {
+    const key = sanitize(product);
+    const closingVal = parseFloat(document.getElementById(`closing_${key}`).value);
+    const soldVal = parseFloat(document.getElementById(`sold_${key}`).value);
+
+    if (isNaN(closingVal) || isNaN(soldVal)) {
+      alert(`Please fill in both closing stock and sold quantity for ${product}.`);
+      return;
+    }
+
+    closingStock[product] = closingVal;
+    soldQty[product] = soldVal;
+
+    const opening = openingStock[product];
+    const expectedClosing = opening - soldVal;
+    const diff = closingVal - expectedClosing;
+
+    if (diff !== 0) {
+      hasDiscrepancy = true;
+      discrepancies[product] = {
+        opening, sold: soldVal, expectedClosing, actualClosing: closingVal, diff
+      };
+    }
+  }
+
+  calculatedData = { closingStock, soldQty, discrepancies };
+
+  if (hasDiscrepancy) {
+    showDiscrepancy(discrepancies);
+  } else {
+    saveLog('submitted', null);
+  }
+}
+
+function showDiscrepancy(discrepancies) {
+  const card = document.getElementById('discrepancyCard');
+  const details = document.getElementById('discrepancyDetails');
+  details.innerHTML = '';
+
+  for (const [product, d] of Object.entries(discrepancies)) {
+    const direction = d.diff > 0 ? 'more than expected' : 'missing';
+    details.innerHTML += `
+      <div class="alert warn">
+        <strong>${product}:</strong> Expected closing stock = ${d.expectedClosing}
+        (Opening ${d.opening} - Sold ${d.sold}), but you entered ${d.actualClosing}.
+        That's <strong>${Math.abs(d.diff)} unit(s) ${direction}</strong>.
+      </div>`;
+  }
+
+  card.classList.remove('hidden');
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function submitWithReason() {
+  const reason = document.getElementById('discrepancyReason').value.trim();
+  if (!reason) {
+    alert('Please provide a reason for the discrepancy before submitting.');
+    return;
+  }
+  await saveLog('flagged', reason);
+}
+
+async function saveLog(status, discrepancyReason) {
+  const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
+
+  const payload = {
+    date: today,
+    locationId: session.locationId,
+    locationName: session.locationName,
+    openingStock: openingStock,
+    closingStock: calculatedData.closingStock,
+    soldQty: calculatedData.soldQty,
+    discrepancy: calculatedData.discrepancies,
+    discrepancyReason: discrepancyReason || '',
+    status: status,
+    submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  try {
+    await logRef.set(payload, { merge: true });
+    document.getElementById('discrepancyCard').classList.add('hidden');
+    document.getElementById('successMsg').classList.remove('hidden');
+    document.getElementById('successMsg').scrollIntoView({ behavior: 'smooth' });
+    document.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
+  } catch (e) {
+    alert('Failed to submit. Check your connection and try again.');
+    console.error(e);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
