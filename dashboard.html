@@ -5,17 +5,62 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ithri Admin - Dashboard</title>
 <link rel="stylesheet" href="shared/style.css">
+<style>
+  .notif-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    background: var(--red);
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .notif-item {
+    border-left: 4px solid var(--yellow);
+    background: #fffbe6;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .notif-item.read {
+    border-left-color: #ccc;
+    background: #fafafa;
+    opacity: 0.7;
+  }
+  .notif-item .notif-time {
+    font-size: 0.75rem;
+    color: var(--gray);
+    margin-top: 4px;
+  }
+  .notif-item.flagged { border-left-color: var(--red); background: #fde2e2; }
+  .photo-thumb { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; cursor: pointer; }
+  .photo-modal { position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; align-items:center;
+    justify-content:center; z-index:2000; }
+  .photo-modal img { max-width:95vw; max-height:90vh; border-radius:8px; }
+</style>
 </head>
 <body>
 <header class="app-header">
   <h1><span class="logo-mark">Ithri</span> Admin Dashboard</h1>
-  <span style="font-size:0.85rem; cursor:pointer;" onclick="logout()">Logout</span>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <span id="notifBell" style="font-size:1.2rem; cursor:pointer; position:relative;" onclick="switchTab('notifications')" title="Notifications">
+      🔔 <span id="notifCount" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px;">0</span>
+    </span>
+    <span style="font-size:0.85rem; cursor:pointer;" onclick="logout()">Logout</span>
+  </div>
 </header>
 
 <div class="container wide">
 
   <div class="tabs">
     <div class="tab active" data-tab="overview">Overview</div>
+    <div class="tab" data-tab="notifications">
+      Notifications <span id="notifTabDot" class="notif-dot hidden"></span>
+    </div>
     <div class="tab" data-tab="locations">Locations</div>
     <div class="tab" data-tab="stock">Supply Stock</div>
     <div class="tab" data-tab="reports">Reports & Logs</div>
@@ -32,16 +77,53 @@
     </div>
 
     <div class="card">
-      <h2>Today's Activity (Real-Time)</h2>
+      <h2>Today's Activity — Real-Time</h2>
       <div style="overflow-x:auto;">
         <table id="todayTable">
           <thead>
-            <tr><th>Location</th><th>Clock In</th><th>Clock Out</th><th>Status</th><th>Discrepancy</th></tr>
+            <tr>
+              <th>Location</th><th>Clock In</th><th>Clock Out</th>
+              <th>In Photo</th><th>Out Photo</th><th>Status</th><th>Low Stock</th><th>Discrepancy</th>
+            </tr>
           </thead>
-          <tbody><tr><td colspan="5">Loading...</td></tr></tbody>
+          <tbody><tr><td colspan="8">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
+  </div>
+
+  <!-- NOTIFICATIONS TAB -->
+  <div id="tab-notifications" class="tab-content hidden">
+    <div class="flex-between" style="margin-bottom:12px;">
+      <h2 style="margin:0;">Notifications</h2>
+      <button class="btn small outline" onclick="markAllRead()">Mark all as read</button>
+    </div>
+
+    <!-- Restock Summary — visible when any low stock alerts exist -->
+    <div id="restockSummaryCard" class="card hidden" style="border:2px solid var(--yellow);">
+      <div class="flex-between" style="margin-bottom:10px;">
+        <h2 style="margin:0; color:#856404;">📋 Restock List</h2>
+        <span style="font-size:0.8rem; color:var(--gray);" id="restockDate"></span>
+      </div>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">
+        All locations currently reporting low stock (below 20% of supplied quantity):
+      </p>
+      <div id="restockListItems"></div>
+      <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+        <button class="btn yellow" onclick="sendRestockToWhatsApp()">📲 Send to WhatsApp</button>
+        <button class="btn small outline" onclick="copyRestockList()">📋 Copy List</button>
+      </div>
+      <div style="margin-top:12px;">
+        <label>WhatsApp Number <span style="font-weight:400; color:var(--gray);">(with country code, e.g. 2348012345678)</span></label>
+        <div class="flex">
+          <input type="tel" id="waNumberInline" placeholder="e.g. 2348012345678" style="margin-bottom:0;">
+          <button class="btn small yellow" onclick="saveWaNumber()">Save</button>
+        </div>
+        <div id="waNumSavedMsg" class="alert success hidden" style="margin-top:6px;">Number saved.</div>
+      </div>
+    </div>
+
+    <div id="notifList"><div class="empty-state">No notifications yet.</div></div>
   </div>
 
   <!-- LOCATIONS TAB -->
@@ -50,12 +132,11 @@
       <h2>Add New Location</h2>
       <label>Location Name (e.g. Shoprite Port Harcourt)</label>
       <input type="text" id="newLocationName" placeholder="Enter location name">
-      <label>Merchandiser Name (optional, for password)</label>
+      <label>Merchandiser Name (optional)</label>
       <input type="text" id="newMerchandiserName" placeholder="e.g. Mary Johnson">
       <button class="btn yellow" onclick="addLocation()">Add Location</button>
       <div id="addLocationMsg" class="alert success hidden">Location added successfully.</div>
     </div>
-
     <div class="card">
       <h2>All Locations</h2>
       <div id="locationsList"><p>Loading...</p></div>
@@ -68,16 +149,12 @@
       <h2>Supply / Update Stock for a Location</h2>
       <label>Select Location</label>
       <select id="stockLocationSelect"><option>Loading...</option></select>
-
-      <div id="productInputs"></div>
-
-      <label>Add New Product</label>
-      <div class="flex">
-        <input type="text" id="newProductName" placeholder="Product name (e.g. Pineapple Juice 50cl)" style="margin-bottom:0;">
-        <button class="btn small yellow" onclick="addProductField()">Add</button>
+      <div id="productInputs" style="margin-top:10px;"></div>
+      <div class="flex" style="margin-top:10px;">
+        <input type="text" id="newProductName" placeholder="New product name" style="margin-bottom:0;">
+        <button class="btn small yellow" onclick="addProductField()">Add Product</button>
       </div>
-
-      <button class="btn yellow" style="margin-top:14px;" onclick="saveStock()">Save Stock for This Location</button>
+      <button class="btn yellow" style="margin-top:14px;" onclick="saveStock()">Save Stock</button>
       <div id="stockSavedMsg" class="alert success hidden">Stock updated successfully.</div>
     </div>
   </div>
@@ -90,7 +167,6 @@
       <select id="reportLocationSelect"><option value="">All Locations</option></select>
       <button class="btn small" onclick="loadReports()">Load Reports</button>
     </div>
-
     <div class="card">
       <h2>Sales & Attendance Logs</h2>
       <div style="overflow-x:auto;">
@@ -98,10 +174,10 @@
           <thead>
             <tr>
               <th>Date</th><th>Location</th><th>Clock In</th><th>Clock Out</th>
-              <th>Sold</th><th>Closing Stock</th><th>Status</th><th>Discrepancy Reason</th>
+              <th>Sold</th><th>Closing Stock</th><th>Low Stock</th><th>Status</th><th>Discrepancy Reason</th>
             </tr>
           </thead>
-          <tbody><tr><td colspan="8">Select a filter and click "Load Reports".</td></tr></tbody>
+          <tbody><tr><td colspan="9">Select a filter and click "Load Reports".</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -116,11 +192,21 @@
       <button class="btn yellow" onclick="changeAdminPassword()">Update Admin Password</button>
       <div id="adminPwMsg" class="alert success hidden">Admin password updated.</div>
     </div>
+    <div class="card">
+      <h2>WhatsApp Restock Number</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        The restock list will be sent to this number. Include country code, no + or spaces (e.g. 2348012345678).
+      </p>
+      <label>WhatsApp Number</label>
+      <input type="tel" id="waNumberSettings" placeholder="e.g. 2348012345678">
+      <button class="btn yellow" onclick="saveWaNumberFromSettings()">Save Number</button>
+      <div id="waSettingsSavedMsg" class="alert success hidden">WhatsApp number saved.</div>
+    </div>
 
     <div class="card">
       <h2>Change Merchandiser Password</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Default password for each location is "impu". You can change it to the merchandiser's first and second name, or any custom password.
+        Default is "impu". Set it to the merchandiser's first and second name or any custom password.
       </p>
       <label>Location</label>
       <select id="merchPwLocationSelect"><option>Loading...</option></select>
@@ -133,14 +219,16 @@
 
 </div>
 
+<!-- Photo lightbox modal -->
+<div id="photoModal" class="photo-modal hidden" onclick="this.classList.add('hidden')">
+  <img id="photoModalImg" src="" alt="Clock photo">
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="shared/firebase-config.js"></script>
-
 <script>
-
-
 if (sessionStorage.getItem('ithri_admin_auth') !== 'true') {
   window.location.href = 'index.html';
 }
@@ -150,20 +238,23 @@ function logout() {
   window.location.href = 'index.html';
 }
 
-// ===== TAB SWITCHING =====
+// ===== TABS =====
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+  document.querySelector(`.tab[data-tab="${name}"]`).classList.add('active');
+  document.getElementById(`tab-${name}`).classList.remove('hidden');
+  if (name === 'notifications') markNotifsSeen();
+}
+
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-    tab.classList.add('active');
-    document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
-  });
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
 });
 
 const today = todayStr();
 let allLocations = [];
 
-// ===== OVERVIEW: REAL-TIME =====
+// ===== OVERVIEW REAL-TIME =====
 function setupRealtimeOverview() {
   db.collection('locations').onSnapshot(snap => {
     allLocations = [];
@@ -177,12 +268,18 @@ function setupRealtimeOverview() {
 function renderTodayTable() {
   const tbody = document.querySelector('#todayTable tbody');
   if (allLocations.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5">No locations yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8">No locations yet.</td></tr>';
+    document.getElementById('statClockedIn').textContent = 0;
+    document.getElementById('statSubmitted').textContent = 0;
+    document.getElementById('statFlagged').textContent = 0;
     return;
   }
 
-  tbody.innerHTML = '';
-  let clockedIn = 0, submitted = 0, flagged = 0;
+  // Clear stale rows for removed locations
+  const validIds = new Set(allLocations.map(l => l.id));
+  [...tbody.querySelectorAll('tr[id]')].forEach(row => {
+    if (!validIds.has(row.id.replace('row-',''))) row.remove();
+  });
 
   allLocations.forEach(loc => {
     db.collection('locations').doc(loc.id).collection('logs').doc(today)
@@ -196,100 +293,250 @@ function renderTodayTable() {
           tbody.appendChild(row);
         }
 
-        let statusBadge = '<span class="badge gray">Not Submitted</span>';
+        let statusBadge = '<span class="badge gray">Pending</span>';
         if (log.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
         if (log.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
+        if (log.status === 'in_progress') statusBadge = '<span class="badge yellow">In Progress</span>';
 
-        let discText = '-';
-        if (log.discrepancyReason) discText = log.discrepancyReason;
+        const inPhoto = log.clockInPhoto
+          ? `<img class="photo-thumb" src="${log.clockInPhoto}" onclick="openPhoto('${log.clockInPhoto}')" title="Clock-in: ${log.clockIn} ${log.clockInDate||''}">`
+          : '-';
+        const outPhoto = log.clockOutPhoto
+          ? `<img class="photo-thumb" src="${log.clockOutPhoto}" onclick="openPhoto('${log.clockOutPhoto}')" title="Clock-out: ${log.clockOut} ${log.clockOutDate||''}">`
+          : '-';
+
+        const lowStock = log.hasLowStock
+          ? `<span class="badge red">⚠️ Low</span>`
+          : '<span class="badge green">OK</span>';
+
+        const discText = log.discrepancyReason
+          ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>`
+          : '-';
 
         row.innerHTML = `
-          <td>${loc.name}</td>
-          <td>${log.clockIn || '-'}</td>
-          <td>${log.clockOut || '-'}</td>
+          <td><strong>${loc.name}</strong></td>
+          <td>${log.clockIn ? `<strong>${log.clockIn}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockInDate||''}</span>` : '-'}</td>
+          <td>${log.clockOut ? `<strong>${log.clockOut}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockOutDate||''}</span>` : '-'}</td>
+          <td>${inPhoto}</td>
+          <td>${outPhoto}</td>
           <td>${statusBadge}</td>
-          <td style="max-width:200px;">${discText}</td>
-        `;
+          <td>${lowStock}</td>
+          <td style="max-width:160px; font-size:0.85rem;">${discText}</td>`;
 
-        // recompute stats
         recomputeStats();
       });
   });
 }
 
 function recomputeStats() {
-  // Quick recompute by reading current table rows
-  const rows = document.querySelectorAll('#todayTable tbody tr');
+  const rows = [...document.querySelectorAll('#todayTable tbody tr[id]')];
   let clockedIn = 0, submitted = 0, flagged = 0;
   rows.forEach(row => {
     const cells = row.children;
-    if (cells.length < 5) return;
-    if (cells[1].textContent !== '-') clockedIn++;
-    if (cells[3].textContent.includes('Submitted')) submitted++;
-    if (cells[3].textContent.includes('Flagged')) flagged++;
+    if (!cells.length) return;
+    if (cells[1] && cells[1].textContent.trim() !== '-') clockedIn++;
+    const status = cells[5] ? cells[5].textContent : '';
+    if (status.includes('Submitted')) submitted++;
+    if (status.includes('Flagged')) flagged++;
   });
   document.getElementById('statClockedIn').textContent = clockedIn;
   document.getElementById('statSubmitted').textContent = submitted;
   document.getElementById('statFlagged').textContent = flagged;
 }
 
-// ===== LOCATIONS TAB =====
-async function addLocation() {
-  const name = document.getElementById('newLocationName').value.trim();
-  const merchName = document.getElementById('newMerchandiserName').value.trim();
-  if (!name) { alert('Please enter a location name.'); return; }
-
-  await db.collection('locations').add({
-    name: name,
-    merchandiserName: merchName,
-    password: 'impu',
-    products: {},
-    offDays: [],
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-
-  document.getElementById('newLocationName').value = '';
-  document.getElementById('newMerchandiserName').value = '';
-  document.getElementById('addLocationMsg').classList.remove('hidden');
-  setTimeout(() => document.getElementById('addLocationMsg').classList.add('hidden'), 3000);
-  renderLocationsList();
+function openPhoto(url) {
+  document.getElementById('photoModalImg').src = url;
+  document.getElementById('photoModal').classList.remove('hidden');
 }
 
-function renderLocationsList() {
-  const listEl = document.getElementById('locationsList');
-  if (allLocations.length === 0) {
-    listEl.innerHTML = '<div class="empty-state">No locations added yet.</div>';
+// ===== NOTIFICATIONS REAL-TIME =====
+function setupRealtimeNotifications() {
+  db.collection('notifications')
+    .orderBy('createdAt', 'desc')
+    .limit(50)
+    .onSnapshot(snap => {
+      const notifList = document.getElementById('notifList');
+      let unread = 0;
+      const items = [];
+
+      snap.forEach(doc => {
+        const n = doc.data();
+        if (!n.read) unread++;
+
+        const time = n.createdAt
+          ? new Date(n.createdAt.toDate()).toLocaleString('en-GB')
+          : n.date;
+
+        let body = '';
+
+        if (n.type === 'low_stock') {
+          const itemLines = Object.entries(n.lowStockItems || {})
+            .map(([p, d]) => `<li><strong>${p}</strong>: ${d.closing} units left (${d.percentRemaining}% of ${d.opening})</li>`)
+            .join('');
+          body = `
+            <div style="font-weight:700; margin-bottom:6px;">
+              📉 Low Stock — ${n.locationName}
+            </div>
+            <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
+            <div style="font-size:0.8rem; margin-top:6px; color:var(--red);">Restock request from merchandiser</div>`;
+        } else if (n.type === 'discrepancy') {
+          body = `
+            <div style="font-weight:700; margin-bottom:6px;">⚠️ Discrepancy — ${n.locationName}</div>
+            <div style="font-size:0.9rem;">Reason: ${n.reason}</div>`;
+        }
+
+        items.push(`
+          <div class="notif-item ${n.read ? 'read' : ''} ${n.type === 'discrepancy' ? 'flagged' : ''}"
+               id="notif-${doc.id}" data-id="${doc.id}">
+            ${body}
+            <div class="notif-time">${time}</div>
+            ${!n.read ? `<button class="btn small outline" style="margin-top:8px;" onclick="markRead('${doc.id}')">Mark as read</button>` : ''}
+          </div>`);
+      });
+
+      notifList.innerHTML = items.length ? items.join('') : '<div class="empty-state">No notifications yet.</div>';
+
+      // Build consolidated restock list from all low-stock alerts
+      buildRestockList(snap);
+
+      // Update bell badge
+      const countEl = document.getElementById('notifCount');
+      const dotEl = document.getElementById('notifTabDot');
+      if (unread > 0) {
+        countEl.textContent = unread;
+        countEl.classList.remove('hidden');
+        dotEl.classList.remove('hidden');
+      } else {
+        countEl.classList.add('hidden');
+        dotEl.classList.add('hidden');
+      }
+    });
+}
+
+async function markRead(id) {
+  await db.collection('notifications').doc(id).update({ read: true });
+}
+
+async function markAllRead() {
+  const snap = await db.collection('notifications').where('read', '==', false).get();
+  const batch = db.batch();
+  snap.forEach(doc => batch.update(doc.ref, { read: true }));
+  await batch.commit();
+}
+
+function markNotifsSeen() {
+  markAllRead();
+}
+
+// ===== RESTOCK LIST =====
+let currentRestockData = []; // [{locationName, items: [{product, closing, percentRemaining, opening}]}]
+
+function buildRestockList(snap) {
+  // Gather all unresolved low-stock notifications, grouped by location
+  const byLocation = {};
+  snap.forEach(doc => {
+    const n = doc.data();
+    if (n.type !== 'low_stock') return;
+    const key = n.locationId;
+    if (!byLocation[key] || n.createdAt > byLocation[key].createdAt) {
+      byLocation[key] = n; // keep most recent per location
+    }
+  });
+
+  currentRestockData = Object.values(byLocation).map(n => ({
+    locationName: n.locationName,
+    date: n.date,
+    items: Object.entries(n.lowStockItems || {}).map(([product, d]) => ({
+      product, closing: d.closing, opening: d.opening, percentRemaining: d.percentRemaining
+    }))
+  }));
+
+  const card = document.getElementById('restockSummaryCard');
+  const listEl = document.getElementById('restockListItems');
+  const dateEl = document.getElementById('restockDate');
+
+  if (currentRestockData.length === 0) {
+    card.classList.add('hidden');
     return;
   }
 
-  listEl.innerHTML = '';
-  allLocations.forEach(loc => {
-    const offDaysText = (loc.offDays && loc.offDays.length > 0)
-      ? loc.offDays.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')
-      : 'Not set / works every day';
+  card.classList.remove('hidden');
+  dateEl.textContent = 'as of ' + new Date().toLocaleDateString('en-GB');
 
-    listEl.innerHTML += `
-      <div class="location-item" style="cursor:default;">
-        <div>
-          <strong>${loc.name}</strong><br>
-          <span style="font-size:0.8rem; color:var(--gray);">
-            Merchandiser: ${loc.merchandiserName || '-'} | Off days: ${offDaysText} | Password: ${loc.password || 'impu'}
-          </span>
-        </div>
-        <button class="btn danger small" onclick="removeLocation('${loc.id}', '${loc.name.replace(/'/g, "\\'")}')">Remove</button>
-      </div>`;
+  listEl.innerHTML = currentRestockData.map(loc => `
+    <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--light-gray);">
+      <div style="font-weight:700; color:var(--green-dark); margin-bottom:4px;">📍 ${loc.locationName}</div>
+      ${loc.items.map(item => `
+        <div style="display:flex; justify-content:space-between; font-size:0.9rem; padding:3px 0;">
+          <span>${item.product}</span>
+          <span style="color:var(--red); font-weight:600;">${item.closing} left / ${item.opening} supplied (${item.percentRemaining}%)</span>
+        </div>`).join('')}
+    </div>`).join('');
+
+  // Pre-fill WA number if saved
+  db.collection('admin').doc('settings').get().then(doc => {
+    if (doc.exists && doc.data().whatsappNumber) {
+      document.getElementById('waNumberInline').value = doc.data().whatsappNumber;
+    }
   });
 }
 
-async function removeLocation(id, name) {
-  if (!confirm(`Are you sure you want to remove "${name}"? This cannot be undone.`)) return;
-  await db.collection('locations').doc(id).delete();
+function buildRestockText() {
+  const date = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+  let text = `*ITHRI FRESH JUICE — RESTOCK REQUEST*\n📅 ${date}\n\n`;
+  currentRestockData.forEach(loc => {
+    text += `📍 *${loc.locationName}*\n`;
+    loc.items.forEach(item => {
+      text += `  • ${item.product}: ${item.closing} units remaining (${item.percentRemaining}% of ${item.opening} supplied)\n`;
+    });
+    text += '\n';
+  });
+  text += '_Please arrange restock for the above locations._';
+  return text;
 }
 
-// ===== STOCK SUPPLY TAB =====
+async function sendRestockToWhatsApp() {
+  let number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
+  if (!number) {
+    alert('Please enter a WhatsApp number first.');
+    return;
+  }
+  const text = encodeURIComponent(buildRestockText());
+  window.open(`https://wa.me/${number}?text=${text}`, '_blank');
+}
+
+async function copyRestockList() {
+  try {
+    await navigator.clipboard.writeText(buildRestockText());
+    alert('Restock list copied to clipboard!');
+  } catch(e) {
+    alert('Could not copy. Please copy the list manually.');
+  }
+}
+
+async function saveWaNumber() {
+  const number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
+  if (!number) return;
+  await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
+  document.getElementById('waNumberSettings').value = number;
+  const msg = document.getElementById('waNumSavedMsg');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+async function saveWaNumberFromSettings() {
+  const number = document.getElementById('waNumberSettings').value.trim().replace(/\D/g, '');
+  if (!number) { alert('Please enter a number.'); return; }
+  await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
+  document.getElementById('waNumberInline').value = number;
+  const msg = document.getElementById('waSettingsSavedMsg');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== LOCATIONS TAB =====
 function populateLocationSelects() {
-  const selects = ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect'];
-  selects.forEach(selId => {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
     const currentVal = sel.value;
     const isReport = selId === 'reportLocationSelect';
@@ -302,13 +549,57 @@ function populateLocationSelects() {
     });
     if (currentVal) sel.value = currentVal;
   });
-
   renderLocationsList();
-  if (document.getElementById('stockLocationSelect').value) {
-    renderProductInputs();
-  }
+  if (document.getElementById('stockLocationSelect').value) renderProductInputs();
 }
 
+async function addLocation() {
+  const name = document.getElementById('newLocationName').value.trim();
+  const merchName = document.getElementById('newMerchandiserName').value.trim();
+  if (!name) { alert('Please enter a location name.'); return; }
+  await db.collection('locations').add({
+    name, merchandiserName: merchName, password: 'impu',
+    products: {}, offDays: [],
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  document.getElementById('newLocationName').value = '';
+  document.getElementById('newMerchandiserName').value = '';
+  const msg = document.getElementById('addLocationMsg');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+function renderLocationsList() {
+  const listEl = document.getElementById('locationsList');
+  if (!allLocations.length) {
+    listEl.innerHTML = '<div class="empty-state">No locations added yet.</div>';
+    return;
+  }
+  listEl.innerHTML = allLocations.map(loc => {
+    const offDaysText = (loc.offDays && loc.offDays.length)
+      ? loc.offDays.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')
+      : 'Works every day';
+    return `
+      <div class="location-item" style="cursor:default; margin-bottom:8px;">
+        <div>
+          <strong>${loc.name}</strong><br>
+          <span style="font-size:0.8rem; color:var(--gray);">
+            Merchandiser: ${loc.merchandiserName || '-'} &nbsp;|&nbsp;
+            Off days: ${offDaysText} &nbsp;|&nbsp;
+            Password: ${loc.password || 'impu'}
+          </span>
+        </div>
+        <button class="btn danger small" onclick="removeLocation('${loc.id}', '${loc.name.replace(/'/g,"\\'")}')">Remove</button>
+      </div>`;
+  }).join('');
+}
+
+async function removeLocation(id, name) {
+  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
+  await db.collection('locations').doc(id).delete();
+}
+
+// ===== STOCK TAB =====
 document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
 
 function renderProductInputs() {
@@ -316,16 +607,13 @@ function renderProductInputs() {
   const loc = allLocations.find(l => l.id === locId);
   const container = document.getElementById('productInputs');
   container.innerHTML = '';
-
   if (!loc) return;
-  const products = loc.products || {};
-
-  for (const [name, qty] of Object.entries(products)) {
+  for (const [name, qty] of Object.entries(loc.products || {})) {
     container.innerHTML += `
-      <div class="flex" style="margin-bottom:10px;">
-        <div style="flex:2;">${name}</div>
+      <div class="flex" style="margin-bottom:10px; align-items:center;">
+        <div style="flex:2; font-weight:600;">${name}</div>
         <input type="number" min="0" value="${qty}" data-product="${name}" style="flex:1; margin-bottom:0;">
-        <button class="btn small danger" onclick="removeProductField('${name.replace(/'/g, "\\'")}')">✕</button>
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
       </div>`;
   }
 }
@@ -334,59 +622,50 @@ function addProductField() {
   const nameInput = document.getElementById('newProductName');
   const name = nameInput.value.trim();
   if (!name) return;
-
   const container = document.getElementById('productInputs');
   container.innerHTML += `
-    <div class="flex" style="margin-bottom:10px;">
-      <div style="flex:2;">${name}</div>
+    <div class="flex" style="margin-bottom:10px; align-items:center;">
+      <div style="flex:2; font-weight:600;">${name}</div>
       <input type="number" min="0" value="0" data-product="${name}" style="flex:1; margin-bottom:0;">
-      <button class="btn small danger" onclick="removeProductField('${name.replace(/'/g, "\\'")}')">✕</button>
+      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
     </div>`;
   nameInput.value = '';
-}
-
-function removeProductField(name) {
-  // Find and remove the row matching this product
-  const container = document.getElementById('productInputs');
-  [...container.children].forEach(row => {
-    const input = row.querySelector(`input[data-product="${name}"]`);
-    if (input) row.remove();
-  });
 }
 
 async function saveStock() {
   const locId = document.getElementById('stockLocationSelect').value;
   if (!locId) { alert('Please select a location.'); return; }
-
   const products = {};
-  document.querySelectorAll('#productInputs input').forEach(input => {
-    const productName = input.dataset.product;
-    products[productName] = parseFloat(input.value) || 0;
+  document.querySelectorAll('#productInputs input[data-product]').forEach(input => {
+    products[input.dataset.product] = parseFloat(input.value) || 0;
   });
-
-  await db.collection('locations').doc(locId).update({ products: products });
-
-  document.getElementById('stockSavedMsg').classList.remove('hidden');
-  setTimeout(() => document.getElementById('stockSavedMsg').classList.add('hidden'), 3000);
+  await db.collection('locations').doc(locId).update({ products });
+  const msg = document.getElementById('stockSavedMsg');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 3000);
+  renderProductInputs();
 }
 
 // ===== REPORTS TAB =====
 async function loadReports() {
   const locId = document.getElementById('reportLocationSelect').value;
   const tbody = document.querySelector('#reportsTable tbody');
-  tbody.innerHTML = '<tr><td colspan="8">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9">Loading...</td></tr>';
 
   const locationsToQuery = locId ? allLocations.filter(l => l.id === locId) : allLocations;
-  let rows = [];
+  const rows = [];
 
   for (const loc of locationsToQuery) {
-    const snap = await db.collection('locations').doc(loc.id).collection('logs')
-      .orderBy('date', 'desc').limit(30).get();
+    const snap = await db.collection('locations').doc(loc.id)
+      .collection('logs').orderBy('date', 'desc').limit(30).get();
 
     snap.forEach(doc => {
       const d = doc.data();
       const soldText = d.soldQty ? Object.entries(d.soldQty).map(([k,v]) => `${k}: ${v}`).join(', ') : '-';
       const closingText = d.closingStock ? Object.entries(d.closingStock).map(([k,v]) => `${k}: ${v}`).join(', ') : '-';
+      const lowStockText = d.hasLowStock
+        ? Object.entries(d.lowStockItems||{}).map(([k,v]) => `${k}: ${v.closing}u (${v.percentRemaining}%)`).join(', ')
+        : 'OK';
 
       let statusBadge = '<span class="badge gray">Pending</span>';
       if (d.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
@@ -396,42 +675,45 @@ async function loadReports() {
         <tr>
           <td>${d.date}</td>
           <td>${loc.name}</td>
-          <td>${d.clockIn || '-'}</td>
-          <td>${d.clockOut || '-'}</td>
+          <td>${d.clockIn || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockInDate||''}</span></td>
+          <td>${d.clockOut || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockOutDate||''}</span></td>
           <td>${soldText}</td>
           <td>${closingText}</td>
+          <td style="color:${d.hasLowStock ? 'var(--red)' : 'var(--green-main)'};">${lowStockText}</td>
           <td>${statusBadge}</td>
           <td>${d.discrepancyReason || '-'}</td>
         </tr>`);
     });
   }
 
-  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="8">No records found.</td></tr>';
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="9">No records found.</td></tr>';
 }
 
 // ===== SETTINGS TAB =====
 async function changeAdminPassword() {
   const newPw = document.getElementById('newAdminPassword').value.trim();
   if (!newPw) { alert('Enter a new password.'); return; }
-
   await db.collection('admin').doc('settings').set({ companyPassword: newPw }, { merge: true });
-  document.getElementById('adminPwMsg').classList.remove('hidden');
   document.getElementById('newAdminPassword').value = '';
-  setTimeout(() => document.getElementById('adminPwMsg').classList.add('hidden'), 3000);
+  const msg = document.getElementById('adminPwMsg');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
 async function changeMerchPassword() {
   const locId = document.getElementById('merchPwLocationSelect').value;
   const newPw = document.getElementById('merchPwNew').value.trim();
   if (!locId || !newPw) { alert('Select a location and enter a new password.'); return; }
-
   await db.collection('locations').doc(locId).update({ password: newPw });
-  document.getElementById('merchPwMsg').classList.remove('hidden');
   document.getElementById('merchPwNew').value = '';
-  setTimeout(() => document.getElementById('merchPwMsg').classList.add('hidden'), 3000);
+  const msg = document.getElementById('merchPwMsg');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
+// ===== BOOT =====
 setupRealtimeOverview();
+setupRealtimeNotifications();
 </script>
 </body>
 </html>
