@@ -19,9 +19,9 @@
   <div id="mainContent" class="hidden">
 
     <div class="card">
-      <h2>Opening Stock (Set by Admin)</h2>
+      <h2>Today's Opening Stock</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        This is the stock supplied to you for today, as entered by the admin.
+        This is your current available stock carried forward from previous reports and admin supplies.
       </p>
       <div id="openingStockList"></div>
     </div>
@@ -53,19 +53,18 @@
       <button class="btn danger" onclick="submitWithReason()">Submit Explanation</button>
     </div>
 
-    <!-- Low stock warning shown to merchandiser before final submit -->
+    <!-- Low stock warning -->
     <div id="lowStockCard" class="card hidden" style="border:2px solid var(--yellow); margin-top:16px;">
       <h2 style="color:#856404;">📉 Low Stock Alert</h2>
       <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
-        The following products are below 20% of opening stock. A restock request has been automatically sent to the admin.
-        You can also share this list directly on WhatsApp.
+        The following products are below 20% of supplied quantity. A restock request has been sent to the admin.
       </p>
       <div id="lowStockDetails"></div>
       <button class="btn yellow" style="margin-top:10px;" onclick="shareLowStockWhatsApp()">📲 Share via WhatsApp</button>
     </div>
 
     <div id="successMsg" class="alert success hidden" style="margin-top:16px;">
-      ✅ Your stock and sales report has been submitted to the admin.
+      ✅ Report submitted. Stock levels updated.
     </div>
 
   </div>
@@ -87,15 +86,21 @@ const session = getSession();
 if (!session.locationId) window.location.href = 'index.html';
 
 const today = todayStr();
-const LOW_STOCK_THRESHOLD = 0.20; // 20%
-let openingStock = {};
+const LOW_STOCK_THRESHOLD = 0.20;
+let openingStock = {};   // currentStock at start of day (what merchandiser works from)
+let suppliedStock = {};  // original products supplied by admin (for % calculations)
 let calculatedData = null;
 
 async function init() {
   try {
     const locDoc = await db.collection('locations').doc(session.locationId).get();
     const locationData = locDoc.data();
-    openingStock = locationData.products || {};
+
+    suppliedStock = locationData.products || {};
+    // currentStock is the running stock; fall back to products if not yet set
+    openingStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
+      ? locationData.currentStock
+      : suppliedStock;
 
     if (Object.keys(openingStock).length === 0) {
       document.getElementById('loadingMsg').innerHTML =
@@ -104,7 +109,8 @@ async function init() {
     }
 
     // Already submitted today?
-    const logDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(today).get();
+    const logDoc = await db.collection('locations').doc(session.locationId)
+      .collection('logs').doc(today).get();
     const logData = logDoc.exists ? logDoc.data() : {};
 
     if (logData.status === 'submitted' || logData.status === 'flagged') {
@@ -129,13 +135,17 @@ function renderForms() {
   const soldInputsEl = document.getElementById('soldInputs');
 
   for (const [product, qty] of Object.entries(openingStock)) {
-    const threshold = Math.ceil(qty * LOW_STOCK_THRESHOLD);
+    const supplied = suppliedStock[product] || qty;
+    const threshold = Math.ceil(supplied * LOW_STOCK_THRESHOLD);
+    const pct = supplied > 0 ? Math.round((qty / supplied) * 100) : 100;
+    const isLow = pct <= 20;
+
     openingList.innerHTML += `
       <div class="flex-between" style="padding:8px 0; border-bottom:1px solid var(--light-gray);">
         <span>${product}</span>
         <div style="text-align:right;">
-          <strong>${qty} units</strong>
-          <div style="font-size:0.75rem; color:var(--gray);">Low stock alert below ${threshold} units</div>
+          <strong style="color:${isLow ? 'var(--red)' : 'inherit'}">${qty} units</strong>
+          <div style="font-size:0.75rem; color:var(--gray);">of ${supplied} supplied | alert below ${threshold}</div>
         </div>
       </div>`;
 
@@ -177,33 +187,28 @@ function calculateAndSubmit() {
     const expectedClosing = opening - soldVal;
     const diff = closingVal - expectedClosing;
 
-    // Discrepancy check
     if (diff !== 0) {
       hasDiscrepancy = true;
-      discrepancies[product] = {
-        opening, sold: soldVal, expectedClosing, actualClosing: closingVal, diff
-      };
+      discrepancies[product] = { opening, sold: soldVal, expectedClosing, actualClosing: closingVal, diff };
     }
 
-    // Low stock check — based on actual closing stock vs original opening
-    const threshold = opening * LOW_STOCK_THRESHOLD;
+    // Low stock: check closing against original supplied amount
+    const supplied = suppliedStock[product] || opening;
+    const threshold = supplied * LOW_STOCK_THRESHOLD;
     if (closingVal <= threshold) {
       lowStockItems[product] = {
         opening,
+        supplied,
         closing: closingVal,
         threshold: Math.ceil(threshold),
-        percentRemaining: Math.round((closingVal / opening) * 100)
+        percentRemaining: Math.round((closingVal / supplied) * 100)
       };
     }
   }
 
   calculatedData = { closingStock, soldQty, discrepancies, lowStockItems };
 
-  // Show low stock warning panel regardless
-  if (Object.keys(lowStockItems).length > 0) {
-    showLowStockWarning(lowStockItems);
-  }
-
+  if (Object.keys(lowStockItems).length > 0) showLowStockWarning(lowStockItems);
   if (hasDiscrepancy) {
     showDiscrepancy(discrepancies);
   } else {
@@ -212,46 +217,38 @@ function calculateAndSubmit() {
 }
 
 function showLowStockWarning(items) {
-  const card = document.getElementById('lowStockCard');
   const details = document.getElementById('lowStockDetails');
   details.innerHTML = '';
-
   for (const [product, d] of Object.entries(items)) {
     details.innerHTML += `
       <div class="alert warn" style="margin-bottom:8px;">
         <strong>${product}</strong><br>
-        ${d.closing} units remaining (${d.percentRemaining}% of opening stock of ${d.opening}).
+        ${d.closing} units remaining (${d.percentRemaining}% of ${d.supplied} supplied).
         <span style="color:var(--red); font-weight:700;"> Restock request sent to admin.</span>
       </div>`;
   }
-  card.classList.remove('hidden');
+  document.getElementById('lowStockCard').classList.remove('hidden');
 }
 
 function showDiscrepancy(discrepancies) {
-  const card = document.getElementById('discrepancyCard');
   const details = document.getElementById('discrepancyDetails');
   details.innerHTML = '';
-
   for (const [product, d] of Object.entries(discrepancies)) {
     const direction = d.diff > 0 ? 'more than expected' : 'missing';
     details.innerHTML += `
       <div class="alert warn">
-        <strong>${product}:</strong> Expected closing stock = ${d.expectedClosing}
+        <strong>${product}:</strong> Expected closing = ${d.expectedClosing}
         (Opening ${d.opening} − Sold ${d.sold}), but you entered ${d.actualClosing}.
         That's <strong>${Math.abs(d.diff)} unit(s) ${direction}</strong>.
       </div>`;
   }
-
-  card.classList.remove('hidden');
-  card.scrollIntoView({ behavior: 'smooth' });
+  document.getElementById('discrepancyCard').classList.remove('hidden');
+  document.getElementById('discrepancyCard').scrollIntoView({ behavior: 'smooth' });
 }
 
 async function submitWithReason() {
   const reason = document.getElementById('discrepancyReason').value.trim();
-  if (!reason) {
-    alert('Please provide a reason for the discrepancy before submitting.');
-    return;
-  }
+  if (!reason) { alert('Please provide a reason for the discrepancy.'); return; }
   await saveLog('flagged', reason);
   await sendDiscrepancyNotification(reason);
 }
@@ -269,8 +266,9 @@ async function sendDiscrepancyNotification(reason) {
 }
 
 async function saveLog(status, discrepancyReason) {
-  const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
   const { closingStock, soldQty, discrepancies, lowStockItems } = calculatedData;
+  const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
+  const locRef = db.collection('locations').doc(session.locationId);
 
   const payload = {
     date: today,
@@ -288,10 +286,14 @@ async function saveLog(status, discrepancyReason) {
   };
 
   try {
-    // Save the daily log
+    // Save daily log
     await logRef.set(payload, { merge: true });
 
-    // If there are low stock items, write a notification to admin
+    // ✅ Update currentStock on the location to closing figures
+    // This carries forward for the next day — stock reduces naturally
+    await locRef.update({ currentStock: closingStock });
+
+    // Fire low stock notification if needed
     if (Object.keys(lowStockItems).length > 0) {
       await sendLowStockNotification(lowStockItems);
     }
@@ -306,29 +308,7 @@ async function saveLog(status, discrepancyReason) {
   }
 }
 
-async function shareLowStockWhatsApp() {
-  // Fetch the admin's saved WhatsApp number
-  const settingsDoc = await db.collection('admin').doc('settings').get();
-  const number = settingsDoc.exists ? (settingsDoc.data().whatsappNumber || '') : '';
-
-  const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  let text = `*ITHRI FRESH JUICE — LOW STOCK ALERT*\n📅 ${date}\n📍 ${session.locationName}\n\n`;
-
-  const items = calculatedData ? calculatedData.lowStockItems : {};
-  for (const [product, d] of Object.entries(items)) {
-    text += `• ${product}: ${d.closing} units remaining (${d.percentRemaining}% of ${d.opening} supplied)\n`;
-  }
-  text += '\n_Please arrange restock at your earliest convenience._';
-
-  const encoded = encodeURIComponent(text);
-  const url = number
-    ? `https://wa.me/${number}?text=${encoded}`
-    : `https://wa.me/?text=${encoded}`;
-  window.open(url, '_blank');
-}
-
 async function sendLowStockNotification(lowStockItems) {
-  // Write to a top-level 'notifications' collection so admin can listen in real-time
   await db.collection('notifications').add({
     type: 'low_stock',
     locationId: session.locationId,
@@ -338,6 +318,21 @@ async function sendLowStockNotification(lowStockItems) {
     read: false,
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
+}
+
+async function shareLowStockWhatsApp() {
+  const settingsDoc = await db.collection('admin').doc('settings').get();
+  const number = settingsDoc.exists ? (settingsDoc.data().whatsappNumber || '') : '';
+  const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  let text = `*ITHRI FRESH JUICE — LOW STOCK ALERT*\n📅 ${date}\n📍 ${session.locationName}\n\n`;
+  for (const [product, d] of Object.entries(calculatedData.lowStockItems)) {
+    text += `• ${product}: ${d.closing} units left (${d.percentRemaining}% of ${d.supplied} supplied)\n`;
+  }
+  text += '\n_Please arrange restock at your earliest convenience._';
+  const url = number
+    ? `https://wa.me/${number}?text=${encodeURIComponent(text)}`
+    : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
 }
 
 init();

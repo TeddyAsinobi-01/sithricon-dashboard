@@ -27,9 +27,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
-
 <script src="shared/firebase-config.js"></script>
-
 <script>
 async function checkSetup() {
   const settingsDoc = await db.collection('admin').doc('settings').get();

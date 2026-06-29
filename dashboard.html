@@ -145,8 +145,22 @@
 
   <!-- STOCK SUPPLY TAB -->
   <div id="tab-stock" class="tab-content hidden">
+
+    <!-- Current stock overview -->
     <div class="card">
-      <h2>Supply / Update Stock for a Location</h2>
+      <h2>Current Stock by Location</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:12px;">
+        Live view of running stock at each location (reduces as merchandisers submit reports).
+      </p>
+      <div id="adminStockOverview"><p style="color:var(--gray);">Select a location below to view.</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Add Supply to a Location</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Enter the <strong>new quantity being added</strong> for each product.
+        This will be <strong>added on top of</strong> the existing stock — it will not replace it.
+      </p>
       <label>Select Location</label>
       <select id="stockLocationSelect"><option>Loading...</option></select>
       <div id="productInputs" style="margin-top:10px;"></div>
@@ -154,9 +168,10 @@
         <input type="text" id="newProductName" placeholder="New product name" style="margin-bottom:0;">
         <button class="btn small yellow" onclick="addProductField()">Add Product</button>
       </div>
-      <button class="btn yellow" style="margin-top:14px;" onclick="saveStock()">Save Stock</button>
-      <div id="stockSavedMsg" class="alert success hidden">Stock updated successfully.</div>
+      <button class="btn yellow" style="margin-top:14px;" onclick="saveStock()">Add Supply</button>
+      <div id="stockSavedMsg" class="alert success hidden">Stock supply added successfully.</div>
     </div>
+
   </div>
 
   <!-- REPORTS TAB -->
@@ -262,6 +277,7 @@ function setupRealtimeOverview() {
     document.getElementById('statLocations').textContent = allLocations.length;
     populateLocationSelects();
     renderTodayTable();
+    renderAdminStockOverview();
   });
 }
 
@@ -602,20 +618,69 @@ async function removeLocation(id, name) {
 // ===== STOCK TAB =====
 document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
 
+function renderAdminStockOverview() {
+  const el = document.getElementById('adminStockOverview');
+  if (!allLocations.length) {
+    el.innerHTML = '<div class="empty-state">No locations yet.</div>';
+    return;
+  }
+  el.innerHTML = allLocations.map(loc => {
+    const current = loc.currentStock || loc.products || {};
+    const supplied = loc.products || {};
+    const hasStock = Object.keys(current).length > 0;
+    const rows = hasStock
+      ? Object.entries(current).map(([product, qty]) => {
+          const sup = supplied[product] || qty;
+          const pct = sup > 0 ? Math.round((qty / sup) * 100) : 100;
+          const isLow = pct <= 20;
+          return `<div class="flex-between" style="padding:5px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
+            <span>${product}</span>
+            <span style="font-weight:700; color:${isLow ? 'var(--red)' : 'var(--green-dark)'};">
+              ${qty} <span style="font-weight:400; color:var(--gray);">/ ${sup} (${pct}%)</span>
+              ${isLow ? ' ⚠️' : ''}
+            </span>
+          </div>`;
+        }).join('')
+      : '<div style="color:var(--gray); font-size:0.85rem;">No stock assigned yet.</div>';
+
+    return `
+      <div style="margin-bottom:14px; padding-bottom:14px; border-bottom:2px solid var(--light-gray);">
+        <div style="font-weight:700; color:var(--green-dark); margin-bottom:6px;">📍 ${loc.name}</div>
+        ${rows}
+      </div>`;
+  }).join('');
+}
+
 function renderProductInputs() {
   const locId = document.getElementById('stockLocationSelect').value;
   const loc = allLocations.find(l => l.id === locId);
   const container = document.getElementById('productInputs');
   container.innerHTML = '';
   if (!loc) return;
-  for (const [name, qty] of Object.entries(loc.products || {})) {
+
+  const current = loc.currentStock || loc.products || {};
+  const supplied = loc.products || {};
+  const allProducts = new Set([...Object.keys(supplied), ...Object.keys(current)]);
+
+  if (allProducts.size === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet. Add one below.</p>';
+    return;
+  }
+
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (leave 0 to not add for that product):</div>';
+
+  allProducts.forEach(name => {
+    const currentQty = current[name] || 0;
     container.innerHTML += `
       <div class="flex" style="margin-bottom:10px; align-items:center;">
-        <div style="flex:2; font-weight:600;">${name}</div>
-        <input type="number" min="0" value="${qty}" data-product="${name}" style="flex:1; margin-bottom:0;">
+        <div style="flex:2;">
+          <div style="font-weight:600;">${name}</div>
+          <div style="font-size:0.75rem; color:var(--gray);">Current stock: ${currentQty}</div>
+        </div>
+        <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
         <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
       </div>`;
-  }
+  });
 }
 
 function addProductField() {
@@ -625,8 +690,11 @@ function addProductField() {
   const container = document.getElementById('productInputs');
   container.innerHTML += `
     <div class="flex" style="margin-bottom:10px; align-items:center;">
-      <div style="flex:2; font-weight:600;">${name}</div>
-      <input type="number" min="0" value="0" data-product="${name}" style="flex:1; margin-bottom:0;">
+      <div style="flex:2;">
+        <div style="font-weight:600;">${name}</div>
+        <div style="font-size:0.75rem; color:var(--gray);">New product</div>
+      </div>
+      <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
       <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
     </div>`;
   nameInput.value = '';
@@ -635,15 +703,38 @@ function addProductField() {
 async function saveStock() {
   const locId = document.getElementById('stockLocationSelect').value;
   if (!locId) { alert('Please select a location.'); return; }
-  const products = {};
+
+  const loc = allLocations.find(l => l.id === locId);
+  const existingCurrent = loc.currentStock || loc.products || {};
+  const existingSupplied = loc.products || {};
+
+  // Build new currentStock and products by ADDING supplied qty to existing
+  const newCurrentStock = { ...existingCurrent };
+  const newProducts = { ...existingSupplied };
+
   document.querySelectorAll('#productInputs input[data-product]').forEach(input => {
-    products[input.dataset.product] = parseFloat(input.value) || 0;
+    const name = input.dataset.product;
+    const addQty = parseFloat(input.value) || 0;
+    if (addQty > 0) {
+      newCurrentStock[name] = (newCurrentStock[name] || 0) + addQty;
+      newProducts[name] = (newProducts[name] || 0) + addQty;
+    } else if (!(name in existingSupplied)) {
+      // New product with 0 added — still register it
+      newCurrentStock[name] = newCurrentStock[name] || 0;
+      newProducts[name] = 0;
+    }
   });
-  await db.collection('locations').doc(locId).update({ products });
+
+  await db.collection('locations').doc(locId).update({
+    products: newProducts,
+    currentStock: newCurrentStock
+  });
+
   const msg = document.getElementById('stockSavedMsg');
   msg.classList.remove('hidden');
   setTimeout(() => msg.classList.add('hidden'), 3000);
   renderProductInputs();
+  renderAdminStockOverview();
 }
 
 // ===== REPORTS TAB =====

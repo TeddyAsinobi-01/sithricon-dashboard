@@ -5,6 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ithri - Dashboard</title>
 <link rel="stylesheet" href="shared/style.css">
+<style>
+  .stock-profile {
+    background: linear-gradient(135deg, var(--green-dark), var(--green-main));
+    border-radius: var(--radius);
+    padding: 16px;
+    color: var(--white);
+    margin-bottom: 16px;
+  }
+  .stock-profile h3 { color: var(--yellow-bright); margin-bottom: 10px; font-size: 1rem; }
+  .stock-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+    font-size: 0.9rem;
+  }
+  .stock-row:last-child { border-bottom: none; }
+  .stock-row .qty { font-weight: 800; font-size: 1.1rem; color: var(--yellow-bright); }
+  .stock-row .qty.low { color: #ff6b6b; }
+  .stock-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 3px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .stock-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--yellow-bright);
+    transition: width 0.5s;
+  }
+  .stock-bar-fill.low { background: #ff6b6b; }
+</style>
 </head>
 <body class="has-bottom-nav">
 <header class="app-header">
@@ -16,6 +52,12 @@
 
   <div id="offDayBanner" class="alert success hidden">
     🎉 Today is your off day. No clock-in or stock entry needed.
+  </div>
+
+  <!-- Stock Profile Card -->
+  <div class="stock-profile">
+    <h3>📦 Current Available Stock</h3>
+    <div id="stockProfile"><div style="opacity:0.7; font-size:0.9rem;">Loading stock...</div></div>
   </div>
 
   <!-- Clock In/Out Card -->
@@ -91,22 +133,52 @@ async function init() {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
-  const locDoc = await db.collection('locations').doc(session.locationId).get();
-  locationData = locDoc.data();
+  // Real-time listener on location doc for live stock updates
+  db.collection('locations').doc(session.locationId).onSnapshot(doc => {
+    locationData = doc.data();
+    renderStockProfile(locationData.currentStock || {}, locationData.products || {});
 
-  // Check off day
-  if (locationData.offDays && locationData.offDays.includes(todayDow)) {
-    document.getElementById('offDayBanner').classList.remove('hidden');
-    document.getElementById('clockCard').classList.add('hidden');
-    return;
-  }
+    // Check off day
+    if (locationData.offDays && locationData.offDays.includes(todayDow)) {
+      document.getElementById('offDayBanner').classList.remove('hidden');
+      document.getElementById('clockCard').classList.add('hidden');
+    }
+  });
 
-  // Check today's log
+  // Check today's log for clock state
   const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
   const logDoc = await logRef.get();
   todayLog = logDoc.exists ? logDoc.data() : null;
-
   renderClockState();
+}
+
+function renderStockProfile(currentStock, suppliedStock) {
+  const el = document.getElementById('stockProfile');
+  const products = Object.keys(currentStock).length > 0 ? currentStock : suppliedStock;
+
+  if (Object.keys(products).length === 0) {
+    el.innerHTML = '<div style="opacity:0.7; font-size:0.9rem;">No stock assigned yet. Contact your admin.</div>';
+    return;
+  }
+
+  el.innerHTML = Object.entries(products).map(([product, qty]) => {
+    const supplied = suppliedStock[product] || qty;
+    const pct = supplied > 0 ? Math.round((qty / supplied) * 100) : 100;
+    const isLow = pct <= 20;
+    return `
+      <div class="stock-row">
+        <div>
+          <div>${product}</div>
+          <div class="stock-bar">
+            <div class="stock-bar-fill ${isLow ? 'low' : ''}" style="width:${Math.min(pct,100)}%"></div>
+          </div>
+        </div>
+        <div style="text-align:right; margin-left:12px;">
+          <span class="qty ${isLow ? 'low' : ''}">${qty}</span>
+          <div style="font-size:0.7rem; opacity:0.7;">of ${supplied} (${pct}%)</div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 function renderClockState() {
@@ -130,7 +202,6 @@ function renderClockState() {
   }
 }
 
-// Preview images before upload
 document.getElementById('clockInPhoto').addEventListener('change', (e) => previewImage(e, 'clockInPreview'));
 document.getElementById('clockOutPhoto').addEventListener('change', (e) => previewImage(e, 'clockOutPreview'));
 
