@@ -4,24 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ithri - My History</title>
-<link rel="stylesheet" href="shared/style.css">
-<style>
-  .history-card {
-    background: var(--white);
-    border-radius: var(--radius);
-    padding: 16px;
-    margin-bottom: 12px;
-    box-shadow: var(--shadow);
-    border-left: 4px solid var(--green-light);
-  }
-  .history-card.flagged { border-left-color: var(--red); }
-  .history-card.pending { border-left-color: var(--light-gray); }
-  .history-date { font-weight: 700; color: var(--green-dark); margin-bottom: 6px; }
-  .history-meta { font-size: 0.8rem; color: var(--gray); margin-bottom: 8px; }
-  .product-row { display:flex; justify-content:space-between; font-size:0.875rem; padding:4px 0; border-bottom:1px solid var(--light-gray); }
-  .product-row:last-child { border-bottom:none; }
-  .summary-totals { background: var(--light-gray); border-radius:8px; padding:10px; margin-top:8px; font-size:0.875rem; }
-</style>
+<link rel="stylesheet" href="../shared/style.css">
 </head>
 <body class="has-bottom-nav">
 <header class="app-header">
@@ -31,14 +14,24 @@
 
 <div class="container">
 
-  <!-- Summary strip -->
-  <div class="stat-grid" style="margin-bottom:16px;">
-    <div class="stat-box"><div class="num" id="totalDays">-</div><div class="label">Days Recorded</div></div>
-    <div class="stat-box"><div class="num" id="totalSold">-</div><div class="label">Total Units Sold</div></div>
-    <div class="stat-box"><div class="num" id="totalFlagged">-</div><div class="label">Flagged Days</div></div>
+  <div class="tabs">
+    <div class="tab active" data-tab="sales">Sales History</div>
+    <div class="tab" data-tab="supply">Supply History</div>
   </div>
 
-  <div id="historyList"><div class="card"><p>Loading...</p></div></div>
+  <div id="tab-sales" class="tab-content">
+    <div class="stat-grid" style="margin-bottom:16px;">
+      <div class="stat-box"><div class="num" id="totalDays">-</div><div class="label">Days Recorded</div></div>
+      <div class="stat-box"><div class="num" id="totalSold">-</div><div class="label">Total Units Sold</div></div>
+      <div class="stat-box"><div class="num" id="totalFlagged">-</div><div class="label">Flagged Days</div></div>
+    </div>
+    <div id="historyList"><div class="card"><p>Loading...</p></div></div>
+  </div>
+
+  <div id="tab-supply" class="tab-content hidden">
+    <div id="supplyList"><div class="card"><p>Loading...</p></div></div>
+  </div>
+
 </div>
 
 <div class="bottom-nav">
@@ -50,17 +43,25 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
-<script src="shared/firebase-config.js"></script>
+<script src="../shared/firebase-config.js"></script>
 <script>
 const session = getSession();
 if (!session.locationId) window.location.href = 'index.html';
 
-async function init() {
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    tab.classList.add('active');
+    document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
+  });
+});
+
+async function loadSalesHistory() {
   const snap = await db.collection('locations').doc(session.locationId)
     .collection('logs').orderBy('date', 'desc').limit(30).get();
 
   const listEl = document.getElementById('historyList');
-
   if (snap.empty) {
     listEl.innerHTML = '<div class="card"><div class="empty-state">No records yet.</div></div>';
     document.getElementById('totalDays').textContent = 0;
@@ -69,63 +70,40 @@ async function init() {
     return;
   }
 
-  let totalSoldUnits = 0;
-  let totalFlagged = 0;
-  let totalDays = 0;
-  let html = '';
+  let totalSoldUnits = 0, totalFlagged = 0, totalDays = 0, html = '';
 
   snap.forEach(doc => {
     const d = doc.data();
     totalDays++;
     if (d.status === 'flagged') totalFlagged++;
-
-    // Sum all sold quantities for this day
-    const daySold = d.soldQty
-      ? Object.values(d.soldQty).reduce((a, b) => a + b, 0)
-      : 0;
+    const daySold = d.soldQty ? Object.values(d.soldQty).reduce((a, b) => a + b, 0) : 0;
     totalSoldUnits += daySold;
 
     let statusBadge = '<span class="badge gray">Pending</span>';
     if (d.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
     if (d.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
 
-    // Product rows
     const products = d.soldQty ? Object.keys(d.soldQty) : [];
     const productRows = products.map(p => `
       <div class="product-row">
         <span>${p}</span>
-        <span>
-          Sold: <strong>${d.soldQty[p]}</strong> &nbsp;|&nbsp;
-          Closing: <strong>${d.closingStock?.[p] ?? '-'}</strong>
-          ${d.discrepancy?.[p] ? ` &nbsp;<span style="color:var(--red)">⚠️ diff: ${d.discrepancy[p].diff > 0 ? '+' : ''}${d.discrepancy[p].diff}</span>` : ''}
-        </span>
+        <span>Sold: <strong>${d.soldQty[p]}</strong> &nbsp;|&nbsp; Closing: <strong>${d.closingStock?.[p] ?? '-'}</strong>
+        ${d.discrepancy?.[p] ? ` &nbsp;<span style="color:var(--red)">⚠️ diff: ${d.discrepancy[p].diff > 0 ? '+' : ''}${d.discrepancy[p].diff}</span>` : ''}</span>
       </div>`).join('');
 
     const cardClass = d.status === 'flagged' ? 'flagged' : d.status === 'submitted' ? '' : 'pending';
 
     html += `
       <div class="history-card ${cardClass}">
-        <div class="flex-between">
-          <div class="history-date">📅 ${d.date}</div>
-          ${statusBadge}
-        </div>
-        <div class="history-meta">
-          🕐 In: ${d.clockIn || '-'} &nbsp;|&nbsp; Out: ${d.clockOut || '-'}
-        </div>
+        <div class="flex-between"><div style="font-weight:700; color:var(--green-dark);">📅 ${d.date}</div>${statusBadge}</div>
+        <div style="font-size:0.8rem; color:var(--gray); margin:6px 0;">🕐 In: ${d.clockIn || '-'} &nbsp;|&nbsp; Out: ${d.clockOut || '-'}</div>
         ${products.length > 0 ? `
           <div style="margin-bottom:4px; font-size:0.8rem; font-weight:600; color:var(--green-dark);">PRODUCTS</div>
           ${productRows}
-          <div class="summary-totals">
-            Total sold today: <strong>${daySold} units</strong>
-          </div>` : '<div style="color:var(--gray); font-size:0.85rem;">No stock report submitted.</div>'}
-        ${d.discrepancyReason ? `
-          <div class="alert warn" style="margin-top:8px; font-size:0.85rem;">
-            <strong>Discrepancy reason:</strong> ${d.discrepancyReason}
-          </div>` : ''}
-        ${d.hasLowStock ? `
-          <div class="alert warn" style="margin-top:8px; font-size:0.85rem;">
-            📉 Low stock alert was raised on this day.
-          </div>` : ''}
+          <div style="background:var(--light-gray); border-radius:8px; padding:10px; margin-top:8px; font-size:0.875rem;">Total sold today: <strong>${daySold} units</strong></div>`
+          : '<div style="color:var(--gray); font-size:0.85rem;">No stock report submitted.</div>'}
+        ${d.discrepancyReason ? `<div class="alert warn" style="margin-top:8px; font-size:0.85rem;"><strong>Discrepancy reason:</strong> ${d.discrepancyReason}</div>` : ''}
+        ${d.hasLowStock ? `<div class="alert warn" style="margin-top:8px; font-size:0.85rem;">📉 Low stock alert was raised on this day.</div>` : ''}
       </div>`;
   });
 
@@ -135,7 +113,46 @@ async function init() {
   listEl.innerHTML = html;
 }
 
-init();
+async function loadSupplyHistory() {
+  const listEl = document.getElementById('supplyList');
+  const snap = await db.collection('supplyRequests')
+    .where('locationId', '==', session.locationId)
+    .orderBy('createdAt', 'desc')
+    .limit(30)
+    .get();
+
+  if (snap.empty) {
+    listEl.innerHTML = '<div class="card"><div class="empty-state">No supply records yet.</div></div>';
+    return;
+  }
+
+  let html = '';
+  snap.forEach(doc => {
+    const d = doc.data();
+    const date = d.createdAt ? new Date(d.createdAt.toDate()).toLocaleString('en-GB') : '-';
+
+    let statusBadge = '<span class="badge gray">Pending</span>';
+    if (d.status === 'confirmed') statusBadge = '<span class="badge green">Confirmed</span>';
+    if (d.status === 'disputed') statusBadge = '<span class="badge red">Disputed</span>';
+    if (d.status === 'cancelled') statusBadge = '<span class="badge red">Cancelled</span>';
+    if (d.status === 'pending_confirmation') statusBadge = '<span class="badge yellow">Awaiting Your Confirmation</span>';
+
+    const itemRows = Object.entries(d.items || {}).map(([p, q]) => `
+      <div class="product-row"><span>${p}</span><span><strong>+${q} units</strong></span></div>`).join('');
+
+    html += `
+      <div class="history-card supply">
+        <div class="flex-between"><div style="font-weight:700; color:#1565C0;">📦 Supply Record</div>${statusBadge}</div>
+        <div style="font-size:0.8rem; color:var(--gray); margin:6px 0;">${date}</div>
+        ${itemRows}
+      </div>`;
+  });
+
+  listEl.innerHTML = html;
+}
+
+loadSalesHistory();
+loadSupplyHistory();
 </script>
 </body>
 </html>

@@ -17,34 +17,26 @@
   <div id="loadingMsg" class="card"><p>Loading today's products...</p></div>
 
   <div id="mainContent" class="hidden">
-
     <div class="card">
       <h2>Today's Opening Stock</h2>
-      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        This is your current available stock carried forward from previous reports and admin supplies.
-      </p>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Current available stock carried forward from previous reports and admin supplies.</p>
       <div id="openingStockList"></div>
     </div>
 
     <div class="card">
       <h2>Enter Closing Stock</h2>
-      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Count what is physically left at the end of the day for each product.
-      </p>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Count what is physically left at the end of the day.</p>
       <div id="closingStockInputs"></div>
     </div>
 
     <div class="card">
       <h2>Enter Total Sold</h2>
-      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Enter how many of each product you sold today.
-      </p>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Enter how many of each product you sold today.</p>
       <div id="soldInputs"></div>
     </div>
 
     <button class="btn yellow" onclick="calculateAndSubmit()">Calculate & Submit</button>
 
-    <!-- Discrepancy section -->
     <div id="discrepancyCard" class="card hidden" style="border:2px solid var(--red); margin-top:16px;">
       <h2 style="color:var(--red);">⚠️ Discrepancy Detected</h2>
       <div id="discrepancyDetails"></div>
@@ -53,20 +45,14 @@
       <button class="btn danger" onclick="submitWithReason()">Submit Explanation</button>
     </div>
 
-    <!-- Low stock warning -->
     <div id="lowStockCard" class="card hidden" style="border:2px solid var(--yellow); margin-top:16px;">
       <h2 style="color:#856404;">📉 Low Stock Alert</h2>
-      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
-        The following products are below 20% of supplied quantity. A restock request has been sent to the admin.
-      </p>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">The following products are at or below the admin-set restock threshold. A restock request has been sent.</p>
       <div id="lowStockDetails"></div>
       <button class="btn yellow" style="margin-top:10px;" onclick="shareLowStockWhatsApp()">📲 Share via WhatsApp</button>
     </div>
 
-    <div id="successMsg" class="alert success hidden" style="margin-top:16px;">
-      ✅ Report submitted. Stock levels updated.
-    </div>
-
+    <div id="successMsg" class="alert success hidden" style="margin-top:16px;">✅ Report submitted. Stock levels updated.</div>
   </div>
 
 </div>
@@ -86,9 +72,9 @@ const session = getSession();
 if (!session.locationId) window.location.href = 'index.html';
 
 const today = todayStr();
-const LOW_STOCK_THRESHOLD = 0.20;
-let openingStock = {};   // currentStock at start of day (what merchandiser works from)
-let suppliedStock = {};  // original products supplied by admin (for % calculations)
+let openingStock = {};
+let suppliedStock = {};
+let thresholds = {};
 let calculatedData = null;
 
 async function init() {
@@ -97,25 +83,21 @@ async function init() {
     const locationData = locDoc.data();
 
     suppliedStock = locationData.products || {};
-    // currentStock is the running stock; fall back to products if not yet set
+    thresholds = locationData.thresholds || {};
     openingStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
       ? locationData.currentStock
       : suppliedStock;
 
     if (Object.keys(openingStock).length === 0) {
-      document.getElementById('loadingMsg').innerHTML =
-        '<div class="alert warn">No products have been supplied to you yet by the admin.</div>';
+      document.getElementById('loadingMsg').innerHTML = '<div class="alert warn">No products have been supplied to you yet by the admin.</div>';
       return;
     }
 
-    // Already submitted today?
-    const logDoc = await db.collection('locations').doc(session.locationId)
-      .collection('logs').doc(today).get();
+    const logDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(today).get();
     const logData = logDoc.exists ? logDoc.data() : {};
 
     if (logData.status === 'submitted' || logData.status === 'flagged') {
-      document.getElementById('loadingMsg').innerHTML =
-        '<div class="alert success">✅ You have already submitted your stock report for today. Thank you!</div>';
+      document.getElementById('loadingMsg').innerHTML = '<div class="alert success">✅ You have already submitted your stock report for today. Thank you!</div>';
       return;
     }
 
@@ -123,10 +105,13 @@ async function init() {
     document.getElementById('loadingMsg').classList.add('hidden');
     document.getElementById('mainContent').classList.remove('hidden');
   } catch(e) {
-    document.getElementById('loadingMsg').innerHTML =
-      '<div class="alert error">Failed to load. Check your connection.</div>';
+    document.getElementById('loadingMsg').innerHTML = '<div class="alert error">Failed to load. Check your connection.</div>';
     console.error(e);
   }
+}
+
+function getThreshold(product, supplied) {
+  return thresholds[product] != null ? thresholds[product] : Math.ceil(supplied * 0.2);
 }
 
 function renderForms() {
@@ -136,38 +121,27 @@ function renderForms() {
 
   for (const [product, qty] of Object.entries(openingStock)) {
     const supplied = suppliedStock[product] || qty;
-    const threshold = Math.ceil(supplied * LOW_STOCK_THRESHOLD);
-    const pct = supplied > 0 ? Math.round((qty / supplied) * 100) : 100;
-    const isLow = pct <= 20;
+    const threshold = getThreshold(product, supplied);
+    const isLow = qty <= threshold;
 
     openingList.innerHTML += `
       <div class="flex-between" style="padding:8px 0; border-bottom:1px solid var(--light-gray);">
         <span>${product}</span>
         <div style="text-align:right;">
           <strong style="color:${isLow ? 'var(--red)' : 'inherit'}">${qty} units</strong>
-          <div style="font-size:0.75rem; color:var(--gray);">of ${supplied} supplied | alert below ${threshold}</div>
+          <div style="font-size:0.75rem; color:var(--gray);">of ${supplied} supplied | threshold: ${threshold}</div>
         </div>
       </div>`;
 
-    closingInputs.innerHTML += `
-      <label>${product} — units remaining</label>
-      <input type="number" min="0" id="closing_${sanitize(product)}" placeholder="0">`;
-
-    soldInputsEl.innerHTML += `
-      <label>${product} — units sold</label>
-      <input type="number" min="0" id="sold_${sanitize(product)}" placeholder="0">`;
+    closingInputs.innerHTML += `<label>${product} — units remaining</label><input type="number" min="0" id="closing_${sanitize(product)}" placeholder="0">`;
+    soldInputsEl.innerHTML += `<label>${product} — units sold</label><input type="number" min="0" id="sold_${sanitize(product)}" placeholder="0">`;
   }
 }
 
-function sanitize(s) {
-  return s.replace(/[^a-zA-Z0-9]/g, '_');
-}
+function sanitize(s) { return s.replace(/[^a-zA-Z0-9]/g, '_'); }
 
 function calculateAndSubmit() {
-  const closingStock = {};
-  const soldQty = {};
-  const discrepancies = {};
-  const lowStockItems = {};
+  const closingStock = {}, soldQty = {}, discrepancies = {}, lowStockItems = {};
   let hasDiscrepancy = false;
 
   for (const product of Object.keys(openingStock)) {
@@ -192,16 +166,12 @@ function calculateAndSubmit() {
       discrepancies[product] = { opening, sold: soldVal, expectedClosing, actualClosing: closingVal, diff };
     }
 
-    // Low stock: check closing against original supplied amount
     const supplied = suppliedStock[product] || opening;
-    const threshold = supplied * LOW_STOCK_THRESHOLD;
+    const threshold = getThreshold(product, supplied);
     if (closingVal <= threshold) {
       lowStockItems[product] = {
-        opening,
-        supplied,
-        closing: closingVal,
-        threshold: Math.ceil(threshold),
-        percentRemaining: Math.round((closingVal / supplied) * 100)
+        opening, supplied, closing: closingVal, threshold,
+        percentRemaining: supplied > 0 ? Math.round((closingVal / supplied) * 100) : 0
       };
     }
   }
@@ -223,7 +193,7 @@ function showLowStockWarning(items) {
     details.innerHTML += `
       <div class="alert warn" style="margin-bottom:8px;">
         <strong>${product}</strong><br>
-        ${d.closing} units remaining (${d.percentRemaining}% of ${d.supplied} supplied).
+        ${d.closing} units remaining (threshold: ${d.threshold}, ${d.percentRemaining}% of ${d.supplied} supplied).
         <span style="color:var(--red); font-weight:700;"> Restock request sent to admin.</span>
       </div>`;
   }
@@ -237,8 +207,7 @@ function showDiscrepancy(discrepancies) {
     const direction = d.diff > 0 ? 'more than expected' : 'missing';
     details.innerHTML += `
       <div class="alert warn">
-        <strong>${product}:</strong> Expected closing = ${d.expectedClosing}
-        (Opening ${d.opening} − Sold ${d.sold}), but you entered ${d.actualClosing}.
+        <strong>${product}:</strong> Expected closing = ${d.expectedClosing} (Opening ${d.opening} − Sold ${d.sold}), but you entered ${d.actualClosing}.
         That's <strong>${Math.abs(d.diff)} unit(s) ${direction}</strong>.
       </div>`;
   }
@@ -255,13 +224,8 @@ async function submitWithReason() {
 
 async function sendDiscrepancyNotification(reason) {
   await db.collection('notifications').add({
-    type: 'discrepancy',
-    locationId: session.locationId,
-    locationName: session.locationName,
-    date: today,
-    reason,
-    read: false,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    type: 'discrepancy', locationId: session.locationId, locationName: session.locationName,
+    date: today, reason, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
 }
 
@@ -271,32 +235,18 @@ async function saveLog(status, discrepancyReason) {
   const locRef = db.collection('locations').doc(session.locationId);
 
   const payload = {
-    date: today,
-    locationId: session.locationId,
-    locationName: session.locationName,
-    openingStock,
-    closingStock,
-    soldQty,
-    discrepancy: discrepancies,
-    discrepancyReason: discrepancyReason || '',
-    lowStockItems,
-    hasLowStock: Object.keys(lowStockItems).length > 0,
-    status,
+    date: today, locationId: session.locationId, locationName: session.locationName,
+    openingStock, closingStock, soldQty, discrepancy: discrepancies,
+    discrepancyReason: discrepancyReason || '', lowStockItems,
+    hasLowStock: Object.keys(lowStockItems).length > 0, status,
     submittedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
 
   try {
-    // Save daily log
     await logRef.set(payload, { merge: true });
-
-    // ✅ Update currentStock on the location to closing figures
-    // This carries forward for the next day — stock reduces naturally
     await locRef.update({ currentStock: closingStock });
 
-    // Fire low stock notification if needed
-    if (Object.keys(lowStockItems).length > 0) {
-      await sendLowStockNotification(lowStockItems);
-    }
+    if (Object.keys(lowStockItems).length > 0) await sendLowStockNotification(lowStockItems);
 
     document.getElementById('discrepancyCard').classList.add('hidden');
     document.getElementById('successMsg').classList.remove('hidden');
@@ -310,13 +260,8 @@ async function saveLog(status, discrepancyReason) {
 
 async function sendLowStockNotification(lowStockItems) {
   await db.collection('notifications').add({
-    type: 'low_stock',
-    locationId: session.locationId,
-    locationName: session.locationName,
-    date: today,
-    lowStockItems,
-    read: false,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    type: 'low_stock', locationId: session.locationId, locationName: session.locationName,
+    date: today, lowStockItems, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
 }
 
@@ -326,12 +271,10 @@ async function shareLowStockWhatsApp() {
   const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   let text = `*ITHRI FRESH JUICE — LOW STOCK ALERT*\n📅 ${date}\n📍 ${session.locationName}\n\n`;
   for (const [product, d] of Object.entries(calculatedData.lowStockItems)) {
-    text += `• ${product}: ${d.closing} units left (${d.percentRemaining}% of ${d.supplied} supplied)\n`;
+    text += `• ${product}: ${d.closing} units left (threshold ${d.threshold}, ${d.percentRemaining}% of ${d.supplied} supplied)\n`;
   }
   text += '\n_Please arrange restock at your earliest convenience._';
-  const url = number
-    ? `https://wa.me/${number}?text=${encodeURIComponent(text)}`
-    : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  const url = number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
   window.open(url, '_blank');
 }
 

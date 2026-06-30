@@ -4,50 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ithri Admin - Dashboard</title>
-<link rel="stylesheet" href="shared/style.css">
-<style>
-  .notif-dot {
-    display: inline-block;
-    width: 10px; height: 10px;
-    background: var(--red);
-    border-radius: 50%;
-    margin-left: 6px;
-    vertical-align: middle;
-    animation: pulse 1.5s infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-  .notif-item {
-    border-left: 4px solid var(--yellow);
-    background: #fffbe6;
-    border-radius: 8px;
-    padding: 14px;
-    margin-bottom: 10px;
-  }
-  .notif-item.read {
-    border-left-color: #ccc;
-    background: #fafafa;
-    opacity: 0.7;
-  }
-  .notif-item .notif-time {
-    font-size: 0.75rem;
-    color: var(--gray);
-    margin-top: 4px;
-  }
-  .notif-item.flagged { border-left-color: var(--red); background: #fde2e2; }
-  .photo-thumb { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; cursor: pointer; }
-  .photo-modal { position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; align-items:center;
-    justify-content:center; z-index:2000; }
-  .photo-modal img { max-width:95vw; max-height:90vh; border-radius:8px; }
-</style>
+<link rel="stylesheet" href="../shared/style.css">
 </head>
 <body>
 <header class="app-header">
   <h1><span class="logo-mark">Ithri</span> Admin Dashboard</h1>
   <div style="display:flex; align-items:center; gap:16px;">
-    <span id="notifBell" style="font-size:1.2rem; cursor:pointer; position:relative;" onclick="switchTab('notifications')" title="Notifications">
+    <span style="font-size:1.2rem; cursor:pointer; position:relative;" onclick="switchTab('notifications')" title="Notifications">
       🔔 <span id="notifCount" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px;">0</span>
     </span>
     <span style="font-size:0.85rem; cursor:pointer;" onclick="logout()">Logout</span>
@@ -58,12 +21,10 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="overview">Overview</div>
-    <div class="tab" data-tab="notifications">
-      Notifications <span id="notifTabDot" class="notif-dot hidden"></span>
-    </div>
+    <div class="tab" data-tab="notifications">Notifications <span id="notifTabDot" class="notif-dot hidden"></span></div>
     <div class="tab" data-tab="locations">Locations</div>
     <div class="tab" data-tab="stock">Supply Stock</div>
-    <div class="tab" data-tab="reports">Reports & Logs</div>
+    <div class="tab" data-tab="reports">Reports & History</div>
     <div class="tab" data-tab="settings">Settings</div>
   </div>
 
@@ -75,17 +36,11 @@
       <div class="stat-box"><div class="num" id="statSubmitted">-</div><div class="label">Submitted Today</div></div>
       <div class="stat-box"><div class="num" id="statFlagged">-</div><div class="label">Flagged Today</div></div>
     </div>
-
     <div class="card">
       <h2>Today's Activity — Real-Time</h2>
       <div style="overflow-x:auto;">
         <table id="todayTable">
-          <thead>
-            <tr>
-              <th>Location</th><th>Clock In</th><th>Clock Out</th>
-              <th>In Photo</th><th>Out Photo</th><th>Status</th><th>Low Stock</th><th>Discrepancy</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Location</th><th>Clock In</th><th>Clock Out</th><th>In Photo</th><th>Out Photo</th><th>Status</th><th>Low Stock</th><th>Discrepancy</th></tr></thead>
           <tbody><tr><td colspan="8">Loading...</td></tr></tbody>
         </table>
       </div>
@@ -99,22 +54,19 @@
       <button class="btn small outline" onclick="markAllRead()">Mark all as read</button>
     </div>
 
-    <!-- Restock Summary — visible when any low stock alerts exist -->
     <div id="restockSummaryCard" class="card hidden" style="border:2px solid var(--yellow);">
       <div class="flex-between" style="margin-bottom:10px;">
         <h2 style="margin:0; color:#856404;">📋 Restock List</h2>
         <span style="font-size:0.8rem; color:var(--gray);" id="restockDate"></span>
       </div>
-      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">
-        All locations currently reporting low stock (below 20% of supplied quantity):
-      </p>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">All locations currently below their restock threshold:</p>
       <div id="restockListItems"></div>
       <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
         <button class="btn yellow" onclick="sendRestockToWhatsApp()">📲 Send to WhatsApp</button>
         <button class="btn small outline" onclick="copyRestockList()">📋 Copy List</button>
       </div>
       <div style="margin-top:12px;">
-        <label>WhatsApp Number <span style="font-weight:400; color:var(--gray);">(with country code, e.g. 2348012345678)</span></label>
+        <label>WhatsApp Number <span style="font-weight:400; color:var(--gray);">(with country code)</span></label>
         <div class="flex">
           <input type="tel" id="waNumberInline" placeholder="e.g. 2348012345678" style="margin-bottom:0;">
           <button class="btn small yellow" onclick="saveWaNumber()">Save</button>
@@ -130,7 +82,7 @@
   <div id="tab-locations" class="tab-content hidden">
     <div class="card">
       <h2>Add New Location</h2>
-      <label>Location Name (e.g. Shoprite Port Harcourt)</label>
+      <label>Location Name</label>
       <input type="text" id="newLocationName" placeholder="Enter location name">
       <label>Merchandiser Name (optional)</label>
       <input type="text" id="newMerchandiserName" placeholder="e.g. Mary Johnson">
@@ -146,20 +98,16 @@
   <!-- STOCK SUPPLY TAB -->
   <div id="tab-stock" class="tab-content hidden">
 
-    <!-- Current stock overview -->
     <div class="card">
       <h2>Current Stock by Location</h2>
-      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:12px;">
-        Live view of running stock at each location (reduces as merchandisers submit reports).
-      </p>
-      <div id="adminStockOverview"><p style="color:var(--gray);">Select a location below to view.</p></div>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:12px;">Live running stock per location, with restock thresholds.</p>
+      <div id="adminStockOverview"><p style="color:var(--gray);">Loading...</p></div>
     </div>
 
     <div class="card">
       <h2>Add Supply to a Location</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Enter the <strong>new quantity being added</strong> for each product.
-        This will be <strong>added on top of</strong> the existing stock — it will not replace it.
+        Enter quantity being <strong>added</strong> for each product. The merchandiser will be asked to confirm receipt before it's added to their stock.
       </p>
       <label>Select Location</label>
       <select id="stockLocationSelect"><option>Loading...</option></select>
@@ -168,32 +116,82 @@
         <input type="text" id="newProductName" placeholder="New product name" style="margin-bottom:0;">
         <button class="btn small yellow" onclick="addProductField()">Add Product</button>
       </div>
-      <button class="btn yellow" style="margin-top:14px;" onclick="saveStock()">Add Supply</button>
-      <div id="stockSavedMsg" class="alert success hidden">Stock supply added successfully.</div>
+      <button class="btn yellow" style="margin-top:14px;" onclick="sendSupplyForConfirmation()">Send Supply for Confirmation</button>
+      <div id="stockSavedMsg" class="alert success hidden">Supply sent to merchandiser for confirmation.</div>
+    </div>
+
+    <div class="card">
+      <h2>Set Restock Thresholds</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Set how many units should remain before the system flags this location as needing restock.
+      </p>
+      <label>Select Location</label>
+      <select id="thresholdLocationSelect"><option>Loading...</option></select>
+      <div id="thresholdInputs" style="margin-top:10px;"></div>
+      <button class="btn yellow" style="margin-top:14px;" onclick="saveThresholds()">Save Thresholds</button>
+      <div id="thresholdSavedMsg" class="alert success hidden">Thresholds saved.</div>
+    </div>
+
+    <div class="card">
+      <h2>Edit / Correct Stock (Discrepancy Fix)</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Directly correct the current stock figure for a location — use this to fix mistakes or reconcile discrepancies.
+      </p>
+      <label>Select Location</label>
+      <select id="editStockLocationSelect"><option>Loading...</option></select>
+      <div id="editStockInputs" style="margin-top:10px;"></div>
+      <button class="btn danger" style="margin-top:14px;" onclick="saveStockEdit()">Save Correction</button>
+      <div id="editStockMsg" class="alert success hidden">Stock corrected.</div>
+    </div>
+
+    <!-- Pending supply requests awaiting merchandiser confirmation -->
+    <div class="card">
+      <h2>Pending / Disputed Supply Requests</h2>
+      <div id="pendingSupplyList"><p style="color:var(--gray); font-size:0.85rem;">No pending requests.</p></div>
     </div>
 
   </div>
 
   <!-- REPORTS TAB -->
   <div id="tab-reports" class="tab-content hidden">
-    <div class="card">
-      <h2>Filter</h2>
-      <label>Location</label>
-      <select id="reportLocationSelect"><option value="">All Locations</option></select>
-      <button class="btn small" onclick="loadReports()">Load Reports</button>
+    <div class="tabs" style="margin-bottom:10px;">
+      <div class="tab active" data-subtab="sales">Sales History</div>
+      <div class="tab" data-subtab="supply">Supply History</div>
     </div>
-    <div class="card">
-      <h2>Sales & Attendance Logs</h2>
-      <div style="overflow-x:auto;">
-        <table id="reportsTable">
-          <thead>
-            <tr>
-              <th>Date</th><th>Location</th><th>Clock In</th><th>Clock Out</th>
-              <th>Sold</th><th>Closing Stock</th><th>Low Stock</th><th>Status</th><th>Discrepancy Reason</th>
-            </tr>
-          </thead>
-          <tbody><tr><td colspan="9">Select a filter and click "Load Reports".</td></tr></tbody>
-        </table>
+
+    <div id="subtab-sales" class="subtab-content">
+      <div class="card">
+        <h2>Filter</h2>
+        <label>Location</label>
+        <select id="reportLocationSelect"><option value="">All Locations</option></select>
+        <button class="btn small" onclick="loadReports()">Load Reports</button>
+      </div>
+      <div class="card">
+        <h2>Sales & Attendance Logs</h2>
+        <div style="overflow-x:auto;">
+          <table id="reportsTable">
+            <thead><tr><th>Date</th><th>Location</th><th>Clock In</th><th>Clock Out</th><th>Sold</th><th>Closing Stock</th><th>Low Stock</th><th>Status</th><th>Discrepancy Reason</th></tr></thead>
+            <tbody><tr><td colspan="9">Select a filter and click "Load Reports".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="subtab-supply" class="subtab-content hidden">
+      <div class="card">
+        <h2>Filter</h2>
+        <label>Location</label>
+        <select id="supplyReportLocationSelect"><option value="">All Locations</option></select>
+        <button class="btn small" onclick="loadSupplyReports()">Load Supply History</button>
+      </div>
+      <div class="card">
+        <h2>Supply Records</h2>
+        <div style="overflow-x:auto;">
+          <table id="supplyReportsTable">
+            <thead><tr><th>Date</th><th>Location</th><th>Products Added</th><th>Status</th></tr></thead>
+            <tbody><tr><td colspan="4">Select a filter and click "Load Supply History".</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -209,20 +207,15 @@
     </div>
     <div class="card">
       <h2>WhatsApp Restock Number</h2>
-      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        The restock list will be sent to this number. Include country code, no + or spaces (e.g. 2348012345678).
-      </p>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Include country code, no + or spaces (e.g. 2348012345678).</p>
       <label>WhatsApp Number</label>
       <input type="tel" id="waNumberSettings" placeholder="e.g. 2348012345678">
       <button class="btn yellow" onclick="saveWaNumberFromSettings()">Save Number</button>
       <div id="waSettingsSavedMsg" class="alert success hidden">WhatsApp number saved.</div>
     </div>
-
     <div class="card">
       <h2>Change Merchandiser Password</h2>
-      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Default is "impu". Set it to the merchandiser's first and second name or any custom password.
-      </p>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Default is "impu". Set to the merchandiser's first and second name or any custom password.</p>
       <label>Location</label>
       <select id="merchPwLocationSelect"><option>Loading...</option></select>
       <label>New Password</label>
@@ -234,7 +227,6 @@
 
 </div>
 
-<!-- Photo lightbox modal -->
 <div id="photoModal" class="photo-modal hidden" onclick="this.classList.add('hidden')">
   <img id="photoModalImg" src="" alt="Clock photo">
 </div>
@@ -242,28 +234,33 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
-<script src="shared/firebase-config.js"></script>
+<script src="../shared/firebase-config.js"></script>
 <script>
-if (sessionStorage.getItem('ithri_admin_auth') !== 'true') {
-  window.location.href = 'index.html';
-}
-
-function logout() {
-  sessionStorage.removeItem('ithri_admin_auth');
-  window.location.href = 'index.html';
-}
+if (sessionStorage.getItem('ithri_admin_auth') !== 'true') window.location.href = 'index.html';
+function logout() { sessionStorage.removeItem('ithri_admin_auth'); window.location.href = 'index.html'; }
 
 // ===== TABS =====
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-  document.querySelector(`.tab[data-tab="${name}"]`).classList.add('active');
+  document.querySelectorAll('.tabs:not(.tabs ~ .tabs) > .tab').forEach(t => {});
+  document.querySelectorAll('#tab-overview, #tab-notifications, #tab-locations, #tab-stock, #tab-reports, #tab-settings').forEach(c => c.classList.add('hidden'));
+  document.querySelectorAll('.container.wide > .tabs > .tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.container.wide > .tabs > .tab[data-tab="${name}"]`).classList.add('active');
   document.getElementById(`tab-${name}`).classList.remove('hidden');
   if (name === 'notifications') markNotifsSeen();
 }
-
-document.querySelectorAll('.tab').forEach(tab => {
+document.querySelectorAll('.container.wide > .tabs > .tab').forEach(tab => {
   tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+});
+
+// Sub-tabs inside Reports
+document.querySelectorAll('.tab-content .tabs .tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const parent = tab.closest('.tabs');
+    parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.subtab-content').forEach(c => c.classList.add('hidden'));
+    document.getElementById(`subtab-${tab.dataset.subtab}`).classList.remove('hidden');
+  });
 });
 
 const today = todayStr();
@@ -281,6 +278,11 @@ function setupRealtimeOverview() {
   });
 }
 
+function getThreshold(loc, product) {
+  const supplied = (loc.products || {})[product] || 0;
+  return (loc.thresholds && loc.thresholds[product] != null) ? loc.thresholds[product] : Math.ceil(supplied * 0.2);
+}
+
 function renderTodayTable() {
   const tbody = document.querySelector('#todayTable tbody');
   if (allLocations.length === 0) {
@@ -291,56 +293,36 @@ function renderTodayTable() {
     return;
   }
 
-  // Clear stale rows for removed locations
   const validIds = new Set(allLocations.map(l => l.id));
   [...tbody.querySelectorAll('tr[id]')].forEach(row => {
     if (!validIds.has(row.id.replace('row-',''))) row.remove();
   });
 
   allLocations.forEach(loc => {
-    db.collection('locations').doc(loc.id).collection('logs').doc(today)
-      .onSnapshot(logDoc => {
-        const log = logDoc.exists ? logDoc.data() : {};
-        const rowId = `row-${loc.id}`;
-        let row = document.getElementById(rowId);
-        if (!row) {
-          row = document.createElement('tr');
-          row.id = rowId;
-          tbody.appendChild(row);
-        }
+    db.collection('locations').doc(loc.id).collection('logs').doc(today).onSnapshot(logDoc => {
+      const log = logDoc.exists ? logDoc.data() : {};
+      const rowId = `row-${loc.id}`;
+      let row = document.getElementById(rowId);
+      if (!row) { row = document.createElement('tr'); row.id = rowId; tbody.appendChild(row); }
 
-        let statusBadge = '<span class="badge gray">Pending</span>';
-        if (log.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
-        if (log.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
-        if (log.status === 'in_progress') statusBadge = '<span class="badge yellow">In Progress</span>';
+      let statusBadge = '<span class="badge gray">Pending</span>';
+      if (log.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
+      if (log.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
+      if (log.status === 'in_progress') statusBadge = '<span class="badge yellow">In Progress</span>';
 
-        const inPhoto = log.clockInPhoto
-          ? `<img class="photo-thumb" src="${log.clockInPhoto}" onclick="openPhoto('${log.clockInPhoto}')" title="Clock-in: ${log.clockIn} ${log.clockInDate||''}">`
-          : '-';
-        const outPhoto = log.clockOutPhoto
-          ? `<img class="photo-thumb" src="${log.clockOutPhoto}" onclick="openPhoto('${log.clockOutPhoto}')" title="Clock-out: ${log.clockOut} ${log.clockOutDate||''}">`
-          : '-';
+      const inPhoto = log.clockInPhoto ? `<img class="photo-thumb" src="${log.clockInPhoto}" onclick="openPhoto('${log.clockInPhoto}')">` : '-';
+      const outPhoto = log.clockOutPhoto ? `<img class="photo-thumb" src="${log.clockOutPhoto}" onclick="openPhoto('${log.clockOutPhoto}')">` : '-';
+      const lowStock = log.hasLowStock ? `<span class="badge red">⚠️ Low</span>` : '<span class="badge green">OK</span>';
+      const discText = log.discrepancyReason ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>` : '-';
 
-        const lowStock = log.hasLowStock
-          ? `<span class="badge red">⚠️ Low</span>`
-          : '<span class="badge green">OK</span>';
-
-        const discText = log.discrepancyReason
-          ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>`
-          : '-';
-
-        row.innerHTML = `
-          <td><strong>${loc.name}</strong></td>
-          <td>${log.clockIn ? `<strong>${log.clockIn}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockInDate||''}</span>` : '-'}</td>
-          <td>${log.clockOut ? `<strong>${log.clockOut}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockOutDate||''}</span>` : '-'}</td>
-          <td>${inPhoto}</td>
-          <td>${outPhoto}</td>
-          <td>${statusBadge}</td>
-          <td>${lowStock}</td>
-          <td style="max-width:160px; font-size:0.85rem;">${discText}</td>`;
-
-        recomputeStats();
-      });
+      row.innerHTML = `
+        <td><strong>${loc.name}</strong></td>
+        <td>${log.clockIn ? `<strong>${log.clockIn}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockInDate||''}</span>` : '-'}</td>
+        <td>${log.clockOut ? `<strong>${log.clockOut}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockOutDate||''}</span>` : '-'}</td>
+        <td>${inPhoto}</td><td>${outPhoto}</td><td>${statusBadge}</td><td>${lowStock}</td>
+        <td style="max-width:160px; font-size:0.85rem;">${discText}</td>`;
+      recomputeStats();
+    });
   });
 }
 
@@ -367,144 +349,98 @@ function openPhoto(url) {
 
 // ===== NOTIFICATIONS REAL-TIME =====
 function setupRealtimeNotifications() {
-  db.collection('notifications')
-    .orderBy('createdAt', 'desc')
-    .limit(50)
-    .onSnapshot(snap => {
-      const notifList = document.getElementById('notifList');
-      let unread = 0;
-      const items = [];
+  db.collection('notifications').orderBy('createdAt', 'desc').limit(50).onSnapshot(snap => {
+    const notifList = document.getElementById('notifList');
+    let unread = 0;
+    const items = [];
 
-      snap.forEach(doc => {
-        const n = doc.data();
-        if (!n.read) unread++;
+    snap.forEach(doc => {
+      const n = doc.data();
+      if (!n.read) unread++;
+      const time = n.createdAt ? new Date(n.createdAt.toDate()).toLocaleString('en-GB') : (n.date || '');
+      let body = '', cls = '';
 
-        const time = n.createdAt
-          ? new Date(n.createdAt.toDate()).toLocaleString('en-GB')
-          : n.date;
-
-        let body = '';
-
-        if (n.type === 'low_stock') {
-          const itemLines = Object.entries(n.lowStockItems || {})
-            .map(([p, d]) => `<li><strong>${p}</strong>: ${d.closing} units left (${d.percentRemaining}% of ${d.opening})</li>`)
-            .join('');
-          body = `
-            <div style="font-weight:700; margin-bottom:6px;">
-              📉 Low Stock — ${n.locationName}
-            </div>
-            <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
-            <div style="font-size:0.8rem; margin-top:6px; color:var(--red);">Restock request from merchandiser</div>`;
-        } else if (n.type === 'discrepancy') {
-          body = `
-            <div style="font-weight:700; margin-bottom:6px;">⚠️ Discrepancy — ${n.locationName}</div>
-            <div style="font-size:0.9rem;">Reason: ${n.reason}</div>`;
-        }
-
-        items.push(`
-          <div class="notif-item ${n.read ? 'read' : ''} ${n.type === 'discrepancy' ? 'flagged' : ''}"
-               id="notif-${doc.id}" data-id="${doc.id}">
-            ${body}
-            <div class="notif-time">${time}</div>
-            ${!n.read ? `<button class="btn small outline" style="margin-top:8px;" onclick="markRead('${doc.id}')">Mark as read</button>` : ''}
-          </div>`);
-      });
-
-      notifList.innerHTML = items.length ? items.join('') : '<div class="empty-state">No notifications yet.</div>';
-
-      // Build consolidated restock list from all low-stock alerts
-      buildRestockList(snap);
-
-      // Update bell badge
-      const countEl = document.getElementById('notifCount');
-      const dotEl = document.getElementById('notifTabDot');
-      if (unread > 0) {
-        countEl.textContent = unread;
-        countEl.classList.remove('hidden');
-        dotEl.classList.remove('hidden');
-      } else {
-        countEl.classList.add('hidden');
-        dotEl.classList.add('hidden');
+      if (n.type === 'low_stock') {
+        const itemLines = Object.entries(n.lowStockItems || {}).map(([p, d]) =>
+          `<li><strong>${p}</strong>: ${d.closing} units left (threshold ${d.threshold})</li>`).join('');
+        body = `<div style="font-weight:700; margin-bottom:6px;">📉 Low Stock — ${n.locationName}</div><ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>`;
+      } else if (n.type === 'discrepancy') {
+        cls = 'flagged';
+        body = `<div style="font-weight:700; margin-bottom:6px;">⚠️ Discrepancy — ${n.locationName}</div><div style="font-size:0.9rem;">Reason: ${n.reason}</div>`;
+      } else if (n.type === 'supply_disputed') {
+        cls = 'flagged';
+        const itemLines = Object.entries(n.items || {}).map(([p, q]) => `<li>${p}: ${q} units</li>`).join('');
+        body = `<div style="font-weight:700; margin-bottom:6px;">❌ Supply Disputed — ${n.locationName}</div>
+          <p style="font-size:0.85rem; margin-bottom:4px;">Merchandiser says this supply was not correct:</p>
+          <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
+          <p style="font-size:0.8rem; color:var(--gray); margin-top:4px;">Go to Supply Stock tab → Pending/Disputed Supply Requests to correct or cancel.</p>`;
       }
+
+      items.push(`<div class="notif-item ${n.read ? 'read' : ''} ${cls}" id="notif-${doc.id}">
+        ${body}<div class="notif-time">${time}</div>
+        ${!n.read ? `<button class="btn small outline" style="margin-top:8px;" onclick="markRead('${doc.id}')">Mark as read</button>` : ''}
+      </div>`);
     });
+
+    notifList.innerHTML = items.length ? items.join('') : '<div class="empty-state">No notifications yet.</div>';
+    buildRestockList();
+
+    const countEl = document.getElementById('notifCount');
+    const dotEl = document.getElementById('notifTabDot');
+    if (unread > 0) { countEl.textContent = unread; countEl.classList.remove('hidden'); dotEl.classList.remove('hidden'); }
+    else { countEl.classList.add('hidden'); dotEl.classList.add('hidden'); }
+  });
 }
 
-async function markRead(id) {
-  await db.collection('notifications').doc(id).update({ read: true });
-}
-
+async function markRead(id) { await db.collection('notifications').doc(id).update({ read: true }); }
 async function markAllRead() {
   const snap = await db.collection('notifications').where('read', '==', false).get();
   const batch = db.batch();
   snap.forEach(doc => batch.update(doc.ref, { read: true }));
   await batch.commit();
 }
+function markNotifsSeen() { markAllRead(); }
 
-function markNotifsSeen() {
-  markAllRead();
-}
-
-// ===== RESTOCK LIST =====
-let currentRestockData = []; // [{locationName, items: [{product, closing, percentRemaining, opening}]}]
-
-function buildRestockList(snap) {
-  // Gather all unresolved low-stock notifications, grouped by location
-  const byLocation = {};
-  snap.forEach(doc => {
-    const n = doc.data();
-    if (n.type !== 'low_stock') return;
-    const key = n.locationId;
-    if (!byLocation[key] || n.createdAt > byLocation[key].createdAt) {
-      byLocation[key] = n; // keep most recent per location
-    }
-  });
-
-  currentRestockData = Object.values(byLocation).map(n => ({
-    locationName: n.locationName,
-    date: n.date,
-    items: Object.entries(n.lowStockItems || {}).map(([product, d]) => ({
-      product, closing: d.closing, opening: d.opening, percentRemaining: d.percentRemaining
-    }))
-  }));
+// ===== RESTOCK LIST (based on live currentStock vs thresholds) =====
+function buildRestockList() {
+  const lowLocations = allLocations.map(loc => {
+    const current = loc.currentStock || loc.products || {};
+    const items = Object.entries(current).filter(([p, qty]) => qty <= getThreshold(loc, p))
+      .map(([p, qty]) => ({ product: p, closing: qty, threshold: getThreshold(loc, p), supplied: (loc.products||{})[p] || qty }));
+    return { locationName: loc.name, items };
+  }).filter(l => l.items.length > 0);
 
   const card = document.getElementById('restockSummaryCard');
   const listEl = document.getElementById('restockListItems');
   const dateEl = document.getElementById('restockDate');
 
-  if (currentRestockData.length === 0) {
-    card.classList.add('hidden');
-    return;
-  }
+  if (lowLocations.length === 0) { card.classList.add('hidden'); return; }
 
   card.classList.remove('hidden');
   dateEl.textContent = 'as of ' + new Date().toLocaleDateString('en-GB');
+  window.currentRestockData = lowLocations;
 
-  listEl.innerHTML = currentRestockData.map(loc => `
+  listEl.innerHTML = lowLocations.map(loc => `
     <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--light-gray);">
       <div style="font-weight:700; color:var(--green-dark); margin-bottom:4px;">📍 ${loc.locationName}</div>
       ${loc.items.map(item => `
         <div style="display:flex; justify-content:space-between; font-size:0.9rem; padding:3px 0;">
           <span>${item.product}</span>
-          <span style="color:var(--red); font-weight:600;">${item.closing} left / ${item.opening} supplied (${item.percentRemaining}%)</span>
+          <span style="color:var(--red); font-weight:600;">${item.closing} left (threshold ${item.threshold})</span>
         </div>`).join('')}
     </div>`).join('');
 
-  // Pre-fill WA number if saved
   db.collection('admin').doc('settings').get().then(doc => {
-    if (doc.exists && doc.data().whatsappNumber) {
-      document.getElementById('waNumberInline').value = doc.data().whatsappNumber;
-    }
+    if (doc.exists && doc.data().whatsappNumber) document.getElementById('waNumberInline').value = doc.data().whatsappNumber;
   });
 }
 
 function buildRestockText() {
   const date = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
   let text = `*ITHRI FRESH JUICE — RESTOCK REQUEST*\n📅 ${date}\n\n`;
-  currentRestockData.forEach(loc => {
+  (window.currentRestockData || []).forEach(loc => {
     text += `📍 *${loc.locationName}*\n`;
-    loc.items.forEach(item => {
-      text += `  • ${item.product}: ${item.closing} units remaining (${item.percentRemaining}% of ${item.opening} supplied)\n`;
-    });
+    loc.items.forEach(item => { text += `  • ${item.product}: ${item.closing} units remaining (threshold ${item.threshold})\n`; });
     text += '\n';
   });
   text += '_Please arrange restock for the above locations._';
@@ -513,60 +449,49 @@ function buildRestockText() {
 
 async function sendRestockToWhatsApp() {
   let number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
-  if (!number) {
-    alert('Please enter a WhatsApp number first.');
-    return;
-  }
-  const text = encodeURIComponent(buildRestockText());
-  window.open(`https://wa.me/${number}?text=${text}`, '_blank');
+  if (!number) { alert('Please enter a WhatsApp number first.'); return; }
+  window.open(`https://wa.me/${number}?text=${encodeURIComponent(buildRestockText())}`, '_blank');
 }
-
 async function copyRestockList() {
-  try {
-    await navigator.clipboard.writeText(buildRestockText());
-    alert('Restock list copied to clipboard!');
-  } catch(e) {
-    alert('Could not copy. Please copy the list manually.');
-  }
+  try { await navigator.clipboard.writeText(buildRestockText()); alert('Restock list copied!'); }
+  catch(e) { alert('Could not copy.'); }
 }
-
 async function saveWaNumber() {
   const number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
   if (!number) return;
   await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
   document.getElementById('waNumberSettings').value = number;
   const msg = document.getElementById('waNumSavedMsg');
-  msg.classList.remove('hidden');
-  setTimeout(() => msg.classList.add('hidden'), 3000);
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
-
 async function saveWaNumberFromSettings() {
   const number = document.getElementById('waNumberSettings').value.trim().replace(/\D/g, '');
   if (!number) { alert('Please enter a number.'); return; }
   await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
   document.getElementById('waNumberInline').value = number;
   const msg = document.getElementById('waSettingsSavedMsg');
-  msg.classList.remove('hidden');
-  setTimeout(() => msg.classList.add('hidden'), 3000);
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
 // ===== LOCATIONS TAB =====
 function populateLocationSelects() {
-  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect'].forEach(selId => {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
     const currentVal = sel.value;
-    const isReport = selId === 'reportLocationSelect';
-    sel.innerHTML = isReport ? '<option value="">All Locations</option>' : '';
+    const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
+    sel.innerHTML = isAllOption ? '<option value="">All Locations</option>' : '';
     allLocations.forEach(loc => {
       const opt = document.createElement('option');
-      opt.value = loc.id;
-      opt.textContent = loc.name;
+      opt.value = loc.id; opt.textContent = loc.name;
       sel.appendChild(opt);
     });
     if (currentVal) sel.value = currentVal;
   });
   renderLocationsList();
   if (document.getElementById('stockLocationSelect').value) renderProductInputs();
+  if (document.getElementById('thresholdLocationSelect').value) renderThresholdInputs();
+  if (document.getElementById('editStockLocationSelect').value) renderEditStockInputs();
+  renderPendingSupplyList();
 }
 
 async function addLocation() {
@@ -575,34 +500,26 @@ async function addLocation() {
   if (!name) { alert('Please enter a location name.'); return; }
   await db.collection('locations').add({
     name, merchandiserName: merchName, password: 'impu',
-    products: {}, offDays: [],
+    products: {}, currentStock: {}, thresholds: {}, offDays: [],
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
   document.getElementById('newLocationName').value = '';
   document.getElementById('newMerchandiserName').value = '';
   const msg = document.getElementById('addLocationMsg');
-  msg.classList.remove('hidden');
-  setTimeout(() => msg.classList.add('hidden'), 3000);
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
 function renderLocationsList() {
   const listEl = document.getElementById('locationsList');
-  if (!allLocations.length) {
-    listEl.innerHTML = '<div class="empty-state">No locations added yet.</div>';
-    return;
-  }
+  if (!allLocations.length) { listEl.innerHTML = '<div class="empty-state">No locations added yet.</div>'; return; }
   listEl.innerHTML = allLocations.map(loc => {
-    const offDaysText = (loc.offDays && loc.offDays.length)
-      ? loc.offDays.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')
-      : 'Works every day';
+    const offDaysText = (loc.offDays && loc.offDays.length) ? loc.offDays.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ') : 'Works every day';
     return `
       <div class="location-item" style="cursor:default; margin-bottom:8px;">
         <div>
           <strong>${loc.name}</strong><br>
           <span style="font-size:0.8rem; color:var(--gray);">
-            Merchandiser: ${loc.merchandiserName || '-'} &nbsp;|&nbsp;
-            Off days: ${offDaysText} &nbsp;|&nbsp;
-            Password: ${loc.password || 'impu'}
+            Merchandiser: ${loc.merchandiserName || '-'} &nbsp;|&nbsp; Off days: ${offDaysText} &nbsp;|&nbsp; Password: ${loc.password || 'impu'}
           </span>
         </div>
         <button class="btn danger small" onclick="removeLocation('${loc.id}', '${loc.name.replace(/'/g,"\\'")}')">Remove</button>
@@ -615,41 +532,32 @@ async function removeLocation(id, name) {
   await db.collection('locations').doc(id).delete();
 }
 
-// ===== STOCK TAB =====
-document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
-
+// ===== STOCK OVERVIEW =====
 function renderAdminStockOverview() {
   const el = document.getElementById('adminStockOverview');
-  if (!allLocations.length) {
-    el.innerHTML = '<div class="empty-state">No locations yet.</div>';
-    return;
-  }
+  if (!allLocations.length) { el.innerHTML = '<div class="empty-state">No locations yet.</div>'; return; }
   el.innerHTML = allLocations.map(loc => {
     const current = loc.currentStock || loc.products || {};
     const supplied = loc.products || {};
     const hasStock = Object.keys(current).length > 0;
-    const rows = hasStock
-      ? Object.entries(current).map(([product, qty]) => {
-          const sup = supplied[product] || qty;
-          const pct = sup > 0 ? Math.round((qty / sup) * 100) : 100;
-          const isLow = pct <= 20;
-          return `<div class="flex-between" style="padding:5px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
-            <span>${product}</span>
-            <span style="font-weight:700; color:${isLow ? 'var(--red)' : 'var(--green-dark)'};">
-              ${qty} <span style="font-weight:400; color:var(--gray);">/ ${sup} (${pct}%)</span>
-              ${isLow ? ' ⚠️' : ''}
-            </span>
-          </div>`;
-        }).join('')
-      : '<div style="color:var(--gray); font-size:0.85rem;">No stock assigned yet.</div>';
+    const rows = hasStock ? Object.entries(current).map(([product, qty]) => {
+      const sup = supplied[product] || qty;
+      const threshold = getThreshold(loc, product);
+      const isLow = qty <= threshold;
+      return `<div class="flex-between" style="padding:5px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
+        <span>${product}</span>
+        <span style="font-weight:700; color:${isLow ? 'var(--red)' : 'var(--green-dark)'};">
+          ${qty} <span style="font-weight:400; color:var(--gray);">/ ${sup} (threshold ${threshold})</span>${isLow ? ' ⚠️' : ''}
+        </span></div>`;
+    }).join('') : '<div style="color:var(--gray); font-size:0.85rem;">No stock assigned yet.</div>';
 
-    return `
-      <div style="margin-bottom:14px; padding-bottom:14px; border-bottom:2px solid var(--light-gray);">
-        <div style="font-weight:700; color:var(--green-dark); margin-bottom:6px;">📍 ${loc.name}</div>
-        ${rows}
-      </div>`;
+    return `<div style="margin-bottom:14px; padding-bottom:14px; border-bottom:2px solid var(--light-gray);">
+      <div style="font-weight:700; color:var(--green-dark); margin-bottom:6px;">📍 ${loc.name}</div>${rows}</div>`;
   }).join('');
 }
+
+// ===== SUPPLY TAB (Feature 5: send for confirmation, not direct add) =====
+document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
 
 function renderProductInputs() {
   const locId = document.getElementById('stockLocationSelect').value;
@@ -657,7 +565,6 @@ function renderProductInputs() {
   const container = document.getElementById('productInputs');
   container.innerHTML = '';
   if (!loc) return;
-
   const current = loc.currentStock || loc.products || {};
   const supplied = loc.products || {};
   const allProducts = new Set([...Object.keys(supplied), ...Object.keys(current)]);
@@ -666,17 +573,12 @@ function renderProductInputs() {
     container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet. Add one below.</p>';
     return;
   }
-
-  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (leave 0 to not add for that product):</div>';
-
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (0 = skip):</div>';
   allProducts.forEach(name => {
     const currentQty = current[name] || 0;
     container.innerHTML += `
       <div class="flex" style="margin-bottom:10px; align-items:center;">
-        <div style="flex:2;">
-          <div style="font-weight:600;">${name}</div>
-          <div style="font-size:0.75rem; color:var(--gray);">Current stock: ${currentQty}</div>
-        </div>
+        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current stock: ${currentQty}</div></div>
         <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
         <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
       </div>`;
@@ -690,51 +592,178 @@ function addProductField() {
   const container = document.getElementById('productInputs');
   container.innerHTML += `
     <div class="flex" style="margin-bottom:10px; align-items:center;">
-      <div style="flex:2;">
-        <div style="font-weight:600;">${name}</div>
-        <div style="font-size:0.75rem; color:var(--gray);">New product</div>
-      </div>
+      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">New product</div></div>
       <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
       <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
     </div>`;
   nameInput.value = '';
 }
 
-async function saveStock() {
+async function sendSupplyForConfirmation() {
   const locId = document.getElementById('stockLocationSelect').value;
   if (!locId) { alert('Please select a location.'); return; }
-
   const loc = allLocations.find(l => l.id === locId);
-  const existingCurrent = loc.currentStock || loc.products || {};
-  const existingSupplied = loc.products || {};
 
-  // Build new currentStock and products by ADDING supplied qty to existing
-  const newCurrentStock = { ...existingCurrent };
-  const newProducts = { ...existingSupplied };
-
+  const items = {};
   document.querySelectorAll('#productInputs input[data-product]').forEach(input => {
-    const name = input.dataset.product;
-    const addQty = parseFloat(input.value) || 0;
-    if (addQty > 0) {
-      newCurrentStock[name] = (newCurrentStock[name] || 0) + addQty;
-      newProducts[name] = (newProducts[name] || 0) + addQty;
-    } else if (!(name in existingSupplied)) {
-      // New product with 0 added — still register it
-      newCurrentStock[name] = newCurrentStock[name] || 0;
-      newProducts[name] = 0;
-    }
+    const qty = parseFloat(input.value) || 0;
+    if (qty > 0) items[input.dataset.product] = qty;
   });
 
-  await db.collection('locations').doc(locId).update({
-    products: newProducts,
-    currentStock: newCurrentStock
+  if (Object.keys(items).length === 0) { alert('Please enter at least one quantity to add.'); return; }
+
+  // Register any brand-new product names in the location's products list at 0,
+  // so thresholds/UI can reference them even before confirmation.
+  const supplied = { ...(loc.products || {}) };
+  let needsProductUpdate = false;
+  for (const name of Object.keys(items)) {
+    if (!(name in supplied)) { supplied[name] = 0; needsProductUpdate = true; }
+  }
+  if (needsProductUpdate) await db.collection('locations').doc(locId).update({ products: supplied });
+
+  // Create a pending supply request — NOT applied to currentStock yet (Feature 5)
+  await db.collection('supplyRequests').add({
+    locationId: locId,
+    locationName: loc.name,
+    items,
+    status: 'pending_confirmation',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
+
+  // Update the "supplied" baseline total immediately so thresholds/% calculations stay meaningful
+  const newSupplied = { ...supplied };
+  for (const [name, qty] of Object.entries(items)) newSupplied[name] = (newSupplied[name] || 0) + qty;
+  await db.collection('locations').doc(locId).update({ products: newSupplied });
 
   const msg = document.getElementById('stockSavedMsg');
-  msg.classList.remove('hidden');
-  setTimeout(() => msg.classList.add('hidden'), 3000);
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 4000);
   renderProductInputs();
-  renderAdminStockOverview();
+}
+
+// ===== Pending/disputed supply requests management =====
+function renderPendingSupplyList() {
+  db.collection('supplyRequests')
+    .where('status', 'in', ['pending_confirmation', 'disputed'])
+    .onSnapshot(snap => {
+      const el = document.getElementById('pendingSupplyList');
+      if (snap.empty) { el.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No pending requests.</p>'; return; }
+
+      let html = '';
+      snap.forEach(doc => {
+        const d = doc.data();
+        const itemLines = Object.entries(d.items || {}).map(([p,q]) => `${p}: ${q}`).join(', ');
+        const isDisputed = d.status === 'disputed';
+
+        html += `
+          <div class="card" style="border-left:4px solid ${isDisputed ? 'var(--red)' : 'var(--yellow)'}; margin-bottom:10px;">
+            <div class="flex-between">
+              <strong>${d.locationName}</strong>
+              <span class="badge ${isDisputed ? 'red' : 'yellow'}">${isDisputed ? 'Disputed' : 'Awaiting Confirmation'}</span>
+            </div>
+            <div style="font-size:0.85rem; color:var(--gray); margin:6px 0;">${itemLines}</div>
+            ${isDisputed ? `
+              <div class="flex" style="margin-top:8px;">
+                <button class="btn small yellow" onclick="correctSupply('${doc.id}', '${d.locationId}')">Correct & Re-send</button>
+                <button class="btn small danger" onclick="cancelSupply('${doc.id}')">Cancel Supply</button>
+              </div>` : `
+              <button class="btn small outline" onclick="cancelSupply('${doc.id}')" style="margin-top:8px;">Cancel Request</button>`}
+          </div>`;
+      });
+      el.innerHTML = html;
+    });
+}
+
+async function cancelSupply(requestId) {
+  if (!confirm('Cancel this supply request?')) return;
+  await db.collection('supplyRequests').doc(requestId).update({
+    status: 'cancelled', cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function correctSupply(requestId, locationId) {
+  const newQty = prompt('Enter corrected quantities as "Product:Qty, Product2:Qty2" or cancel to leave unchanged:');
+  if (!newQty) return;
+  const items = {};
+  newQty.split(',').forEach(pair => {
+    const [name, qty] = pair.split(':').map(s => s.trim());
+    if (name && qty) items[name] = parseFloat(qty) || 0;
+  });
+  if (Object.keys(items).length === 0) { alert('No valid items entered.'); return; }
+
+  await db.collection('supplyRequests').doc(requestId).update({
+    items, status: 'pending_confirmation', correctedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  alert('Corrected supply sent back to merchandiser for confirmation.');
+}
+
+// ===== THRESHOLDS (Feature 1) =====
+document.getElementById('thresholdLocationSelect').addEventListener('change', renderThresholdInputs);
+
+function renderThresholdInputs() {
+  const locId = document.getElementById('thresholdLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('thresholdInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const products = loc.products || {};
+  const thresholds = loc.thresholds || {};
+
+  if (Object.keys(products).length === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products supplied to this location yet.</p>';
+    return;
+  }
+  Object.keys(products).forEach(name => {
+    const defaultThreshold = thresholds[name] != null ? thresholds[name] : Math.ceil(products[name] * 0.2);
+    container.innerHTML += `
+      <label>${name} — restock when stock falls to or below:</label>
+      <input type="number" min="0" value="${defaultThreshold}" data-threshold-product="${name}">`;
+  });
+}
+
+async function saveThresholds() {
+  const locId = document.getElementById('thresholdLocationSelect').value;
+  if (!locId) { alert('Select a location.'); return; }
+  const thresholds = {};
+  document.querySelectorAll('#thresholdInputs input[data-threshold-product]').forEach(input => {
+    thresholds[input.dataset.thresholdProduct] = parseFloat(input.value) || 0;
+  });
+  await db.collection('locations').doc(locId).update({ thresholds });
+  const msg = document.getElementById('thresholdSavedMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== EDIT/CORRECT STOCK (Feature 3) =====
+document.getElementById('editStockLocationSelect').addEventListener('change', renderEditStockInputs);
+
+function renderEditStockInputs() {
+  const locId = document.getElementById('editStockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('editStockInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  if (Object.keys(current).length === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No stock recorded yet for this location.</p>';
+    return;
+  }
+  Object.entries(current).forEach(([name, qty]) => {
+    container.innerHTML += `<label>${name} — corrected quantity:</label><input type="number" min="0" value="${qty}" data-edit-product="${name}">`;
+  });
+}
+
+async function saveStockEdit() {
+  const locId = document.getElementById('editStockLocationSelect').value;
+  if (!locId) { alert('Select a location.'); return; }
+  if (!confirm('This will directly overwrite the current stock figures. Continue?')) return;
+
+  const newCurrent = {};
+  document.querySelectorAll('#editStockInputs input[data-edit-product]').forEach(input => {
+    newCurrent[input.dataset.editProduct] = parseFloat(input.value) || 0;
+  });
+
+  await db.collection('locations').doc(locId).update({ currentStock: newCurrent });
+  const msg = document.getElementById('editStockMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
 // ===== REPORTS TAB =====
@@ -742,42 +771,55 @@ async function loadReports() {
   const locId = document.getElementById('reportLocationSelect').value;
   const tbody = document.querySelector('#reportsTable tbody');
   tbody.innerHTML = '<tr><td colspan="9">Loading...</td></tr>';
-
   const locationsToQuery = locId ? allLocations.filter(l => l.id === locId) : allLocations;
   const rows = [];
 
   for (const loc of locationsToQuery) {
-    const snap = await db.collection('locations').doc(loc.id)
-      .collection('logs').orderBy('date', 'desc').limit(30).get();
-
+    const snap = await db.collection('locations').doc(loc.id).collection('logs').orderBy('date', 'desc').limit(30).get();
     snap.forEach(doc => {
       const d = doc.data();
       const soldText = d.soldQty ? Object.entries(d.soldQty).map(([k,v]) => `${k}: ${v}`).join(', ') : '-';
       const closingText = d.closingStock ? Object.entries(d.closingStock).map(([k,v]) => `${k}: ${v}`).join(', ') : '-';
-      const lowStockText = d.hasLowStock
-        ? Object.entries(d.lowStockItems||{}).map(([k,v]) => `${k}: ${v.closing}u (${v.percentRemaining}%)`).join(', ')
-        : 'OK';
-
+      const lowStockText = d.hasLowStock ? Object.entries(d.lowStockItems||{}).map(([k,v]) => `${k}: ${v.closing}u`).join(', ') : 'OK';
       let statusBadge = '<span class="badge gray">Pending</span>';
       if (d.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
       if (d.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
 
-      rows.push(`
-        <tr>
-          <td>${d.date}</td>
-          <td>${loc.name}</td>
-          <td>${d.clockIn || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockInDate||''}</span></td>
-          <td>${d.clockOut || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockOutDate||''}</span></td>
-          <td>${soldText}</td>
-          <td>${closingText}</td>
-          <td style="color:${d.hasLowStock ? 'var(--red)' : 'var(--green-main)'};">${lowStockText}</td>
-          <td>${statusBadge}</td>
-          <td>${d.discrepancyReason || '-'}</td>
-        </tr>`);
+      rows.push(`<tr>
+        <td>${d.date}</td><td>${loc.name}</td>
+        <td>${d.clockIn || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockInDate||''}</span></td>
+        <td>${d.clockOut || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockOutDate||''}</span></td>
+        <td>${soldText}</td><td>${closingText}</td>
+        <td style="color:${d.hasLowStock ? 'var(--red)' : 'var(--green-main)'};">${lowStockText}</td>
+        <td>${statusBadge}</td><td>${d.discrepancyReason || '-'}</td></tr>`);
     });
   }
-
   tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="9">No records found.</td></tr>';
+}
+
+async function loadSupplyReports() {
+  const locId = document.getElementById('supplyReportLocationSelect').value;
+  const tbody = document.querySelector('#supplyReportsTable tbody');
+  tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+
+  let query = db.collection('supplyRequests').orderBy('createdAt', 'desc').limit(50);
+  const snap = await query.get();
+  const rows = [];
+
+  snap.forEach(doc => {
+    const d = doc.data();
+    if (locId && d.locationId !== locId) return;
+    const date = d.createdAt ? new Date(d.createdAt.toDate()).toLocaleString('en-GB') : '-';
+    const items = Object.entries(d.items || {}).map(([p,q]) => `${p}: +${q}`).join(', ');
+    let statusBadge = '<span class="badge gray">Pending</span>';
+    if (d.status === 'confirmed') statusBadge = '<span class="badge green">Confirmed</span>';
+    if (d.status === 'disputed') statusBadge = '<span class="badge red">Disputed</span>';
+    if (d.status === 'cancelled') statusBadge = '<span class="badge red">Cancelled</span>';
+    if (d.status === 'pending_confirmation') statusBadge = '<span class="badge yellow">Awaiting Confirmation</span>';
+    rows.push(`<tr><td>${date}</td><td>${d.locationName}</td><td>${items}</td><td>${statusBadge}</td></tr>`);
+  });
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="4">No supply records found.</td></tr>';
 }
 
 // ===== SETTINGS TAB =====
@@ -787,8 +829,7 @@ async function changeAdminPassword() {
   await db.collection('admin').doc('settings').set({ companyPassword: newPw }, { merge: true });
   document.getElementById('newAdminPassword').value = '';
   const msg = document.getElementById('adminPwMsg');
-  msg.classList.remove('hidden');
-  setTimeout(() => msg.classList.add('hidden'), 3000);
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
 async function changeMerchPassword() {
@@ -798,8 +839,7 @@ async function changeMerchPassword() {
   await db.collection('locations').doc(locId).update({ password: newPw });
   document.getElementById('merchPwNew').value = '';
   const msg = document.getElementById('merchPwMsg');
-  msg.classList.remove('hidden');
-  setTimeout(() => msg.classList.add('hidden'), 3000);
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
 // ===== BOOT =====

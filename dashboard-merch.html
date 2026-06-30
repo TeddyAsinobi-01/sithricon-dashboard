@@ -5,42 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ithri - Dashboard</title>
 <link rel="stylesheet" href="shared/style.css">
-<style>
-  .stock-profile {
-    background: linear-gradient(135deg, var(--green-dark), var(--green-main));
-    border-radius: var(--radius);
-    padding: 16px;
-    color: var(--white);
-    margin-bottom: 16px;
-  }
-  .stock-profile h3 { color: var(--yellow-bright); margin-bottom: 10px; font-size: 1rem; }
-  .stock-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.15);
-    font-size: 0.9rem;
-  }
-  .stock-row:last-child { border-bottom: none; }
-  .stock-row .qty { font-weight: 800; font-size: 1.1rem; color: var(--yellow-bright); }
-  .stock-row .qty.low { color: #ff6b6b; }
-  .stock-bar {
-    width: 100%;
-    height: 6px;
-    background: rgba(255,255,255,0.2);
-    border-radius: 3px;
-    margin-top: 4px;
-    overflow: hidden;
-  }
-  .stock-bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    background: var(--yellow-bright);
-    transition: width 0.5s;
-  }
-  .stock-bar-fill.low { background: #ff6b6b; }
-</style>
 </head>
 <body class="has-bottom-nav">
 <header class="app-header">
@@ -50,8 +14,19 @@
 
 <div class="container">
 
-  <div id="offDayBanner" class="alert success hidden">
-    🎉 Today is your off day. No clock-in or stock entry needed.
+  <div id="offDayBanner" class="alert success hidden">🎉 Today is your off day. No clock-in or stock entry needed.</div>
+
+  <!-- Supply Confirmation Banner (Feature 5) -->
+  <div id="supplyConfirmBanner" class="supply-confirm-banner hidden">
+    <h3 style="color:#0d47a1; margin-bottom:8px;">📦 New Supply Pending Confirmation</h3>
+    <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+      The admin has recorded a new stock supply for your location. Please confirm you received the exact amounts below.
+    </p>
+    <div id="supplyConfirmItems" style="margin-bottom:12px;"></div>
+    <div class="flex">
+      <button class="btn yellow" onclick="confirmSupply(true)">✅ Yes, I received this</button>
+      <button class="btn danger" onclick="confirmSupply(false)">❌ Not correct</button>
+    </div>
   </div>
 
   <!-- Stock Profile Card -->
@@ -73,9 +48,7 @@
     </div>
 
     <div id="clockedInInfo" class="hidden">
-      <div class="alert success">
-        ✅ Clocked in at <strong id="clockInTimeDisplay"></strong>
-      </div>
+      <div class="alert success">✅ Clocked in at <strong id="clockInTimeDisplay"></strong></div>
     </div>
 
     <div id="clockOutSection" class="hidden" style="margin-top:14px;">
@@ -86,18 +59,15 @@
     </div>
 
     <div id="clockedOutInfo" class="hidden">
-      <div class="alert success">
-        ✅ Clocked out at <strong id="clockOutTimeDisplay"></strong>. Don't forget to record your closing stock.
-      </div>
+      <div class="alert success">✅ Clocked out at <strong id="clockOutTimeDisplay"></strong>. Don't forget to record your closing stock.</div>
     </div>
   </div>
 
-  <!-- Quick links -->
   <div class="card">
     <h2>Today's Tasks</h2>
     <div style="display:flex; flex-direction:column; gap:10px;">
       <a href="stock.html" style="text-decoration:none;"><button class="btn">📦 Record Stock & Sales</button></a>
-      <a href="history.html" style="text-decoration:none;"><button class="btn outline">📋 View My History</button></a>
+      <a href="history.html" style="text-decoration:none;"><button class="btn outline">📋 View Full History</button></a>
     </div>
   </div>
 
@@ -122,11 +92,9 @@ const today = todayStr();
 const todayDow = dayOfWeek();
 let locationData = null;
 let todayLog = null;
+let pendingSupplyRequest = null;
 
-function logout() {
-  clearSession();
-  window.location.href = 'index.html';
-}
+function logout() { clearSession(); window.location.href = 'index.html'; }
 
 async function init() {
   document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('en-GB', {
@@ -136,23 +104,78 @@ async function init() {
   // Real-time listener on location doc for live stock updates
   db.collection('locations').doc(session.locationId).onSnapshot(doc => {
     locationData = doc.data();
-    renderStockProfile(locationData.currentStock || {}, locationData.products || {});
-
-    // Check off day
+    renderStockProfile(locationData.currentStock || {}, locationData.products || {}, locationData.thresholds || {});
     if (locationData.offDays && locationData.offDays.includes(todayDow)) {
       document.getElementById('offDayBanner').classList.remove('hidden');
       document.getElementById('clockCard').classList.add('hidden');
     }
   });
 
-  // Check today's log for clock state
+  // Listen for pending supply requests needing confirmation (Feature 5)
+  db.collection('supplyRequests')
+    .where('locationId', '==', session.locationId)
+    .where('status', '==', 'pending_confirmation')
+    .onSnapshot(snap => {
+      if (snap.empty) {
+        document.getElementById('supplyConfirmBanner').classList.add('hidden');
+        pendingSupplyRequest = null;
+        return;
+      }
+      const doc = snap.docs[0];
+      pendingSupplyRequest = { id: doc.id, ...doc.data() };
+      renderSupplyConfirmation(pendingSupplyRequest);
+    });
+
   const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
   const logDoc = await logRef.get();
   todayLog = logDoc.exists ? logDoc.data() : null;
   renderClockState();
 }
 
-function renderStockProfile(currentStock, suppliedStock) {
+function renderSupplyConfirmation(req) {
+  const banner = document.getElementById('supplyConfirmBanner');
+  const itemsEl = document.getElementById('supplyConfirmItems');
+  itemsEl.innerHTML = Object.entries(req.items || {}).map(([product, qty]) => `
+    <div class="flex-between" style="padding:6px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
+      <span>${product}</span><strong>+${qty} units</strong>
+    </div>`).join('');
+  banner.classList.remove('hidden');
+}
+
+async function confirmSupply(received) {
+  if (!pendingSupplyRequest) return;
+  const reqRef = db.collection('supplyRequests').doc(pendingSupplyRequest.id);
+
+  if (received) {
+    // Apply the supply to currentStock now
+    const locRef = db.collection('locations').doc(session.locationId);
+    const locSnap = await locRef.get();
+    const current = locSnap.data().currentStock || locSnap.data().products || {};
+    const newCurrent = { ...current };
+    for (const [product, qty] of Object.entries(pendingSupplyRequest.items)) {
+      newCurrent[product] = (newCurrent[product] || 0) + qty;
+    }
+    await locRef.update({ currentStock: newCurrent });
+    await reqRef.update({ status: 'confirmed', confirmedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    alert('Supply confirmed and added to your stock!');
+  } else {
+    // Flag dispute — admin will need to correct or cancel
+    await reqRef.update({ status: 'disputed', disputedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await db.collection('notifications').add({
+      type: 'supply_disputed',
+      locationId: session.locationId,
+      locationName: session.locationName,
+      supplyRequestId: pendingSupplyRequest.id,
+      items: pendingSupplyRequest.items,
+      read: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert('We have notified the admin that this supply amount was not correct.');
+  }
+  document.getElementById('supplyConfirmBanner').classList.add('hidden');
+}
+
+function renderStockProfile(currentStock, suppliedStock, thresholds) {
   const el = document.getElementById('stockProfile');
   const products = Object.keys(currentStock).length > 0 ? currentStock : suppliedStock;
 
@@ -163,15 +186,15 @@ function renderStockProfile(currentStock, suppliedStock) {
 
   el.innerHTML = Object.entries(products).map(([product, qty]) => {
     const supplied = suppliedStock[product] || qty;
+    const threshold = thresholds[product] != null ? thresholds[product] : Math.ceil(supplied * 0.2);
     const pct = supplied > 0 ? Math.round((qty / supplied) * 100) : 100;
-    const isLow = pct <= 20;
+    const isLow = qty <= threshold;
     return `
       <div class="stock-row">
         <div>
           <div>${product}</div>
-          <div class="stock-bar">
-            <div class="stock-bar-fill ${isLow ? 'low' : ''}" style="width:${Math.min(pct,100)}%"></div>
-          </div>
+          <div class="stock-bar"><div class="stock-bar-fill ${isLow ? 'low' : ''}" style="width:${Math.min(pct,100)}%"></div></div>
+          <div style="font-size:0.7rem; opacity:0.7; margin-top:2px;">Restock threshold: ${threshold} units</div>
         </div>
         <div style="text-align:right; margin-left:12px;">
           <span class="qty ${isLow ? 'low' : ''}">${qty}</span>
@@ -191,7 +214,6 @@ function renderClockState() {
     clockInSection.classList.add('hidden');
     clockedInInfo.classList.remove('hidden');
     document.getElementById('clockInTimeDisplay').textContent = todayLog.clockIn;
-
     if (todayLog.clockOut) {
       clockOutSection.classList.add('hidden');
       clockedOutInfo.classList.remove('hidden');
@@ -218,28 +240,18 @@ function previewImage(e, previewId) {
 }
 
 async function submitClockIn() {
-  const fileInput = document.getElementById('clockInPhoto');
-  const file = fileInput.files[0];
+  const file = document.getElementById('clockInPhoto').files[0];
   if (!file) { alert('Please take a clock-in photo first.'); return; }
-
   const btn = event.target;
   btn.disabled = true; btn.textContent = 'Uploading...';
-
   try {
     const meta = await getImageMetadata(file);
     const photoUrl = await uploadImage(file, `clockins/${session.locationId}/${today}_in.jpg`);
-
     const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
     await logRef.set({
-      date: today,
-      locationId: session.locationId,
-      locationName: session.locationName,
-      clockIn: meta.time,
-      clockInDate: meta.date,
-      clockInPhoto: photoUrl,
-      status: 'in_progress'
+      date: today, locationId: session.locationId, locationName: session.locationName,
+      clockIn: meta.time, clockInDate: meta.date, clockInPhoto: photoUrl, status: 'in_progress'
     }, { merge: true });
-
     todayLog = { clockIn: meta.time };
     renderClockState();
   } catch (e) {
@@ -250,24 +262,15 @@ async function submitClockIn() {
 }
 
 async function submitClockOut() {
-  const fileInput = document.getElementById('clockOutPhoto');
-  const file = fileInput.files[0];
+  const file = document.getElementById('clockOutPhoto').files[0];
   if (!file) { alert('Please take a clock-out photo first.'); return; }
-
   const btn = event.target;
   btn.disabled = true; btn.textContent = 'Uploading...';
-
   try {
     const meta = await getImageMetadata(file);
     const photoUrl = await uploadImage(file, `clockouts/${session.locationId}/${today}_out.jpg`);
-
     const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
-    await logRef.set({
-      clockOut: meta.time,
-      clockOutDate: meta.date,
-      clockOutPhoto: photoUrl
-    }, { merge: true });
-
+    await logRef.set({ clockOut: meta.time, clockOutDate: meta.date, clockOutPhoto: photoUrl }, { merge: true });
     todayLog.clockOut = meta.time;
     renderClockState();
   } catch (e) {

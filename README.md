@@ -4,76 +4,62 @@
 ```
 ithri/
 ├── shared/
-│   ├── style.css          # Design system (colors from Ithri logo)
-│   └── firebase-config.js # Firebase setup + helper functions
+│   ├── style.css
+│   └── firebase-config.js   # Your Firebase project credentials live here
 ├── merchandiser/
-│   ├── index.html         # Location selection + login
-│   ├── off-days.html       # First-login off-days setup
-│   ├── dashboard.html      # Clock in/out with photo
-│   ├── stock.html          # Closing stock + sales + discrepancy
-│   ├── history.html        # Personal history
-│   └── manifest.json       # PWA manifest (installable on phone)
+│   ├── index.html           # Location login
+│   ├── off-days.html        # First-login off-days setup
+│   ├── dashboard.html       # Stock profile, clock in/out, supply confirmation banner
+│   ├── stock.html           # Closing stock + sales + discrepancy + low stock
+│   ├── history.html         # Sales history + Supply history (tabs)
+│   └── manifest.json
 └── admin/
-    ├── index.html          # Admin login (sets password on first use)
-    └── dashboard.html      # Overview, Locations, Stock Supply, Reports, Settings
+    ├── index.html           # Admin login
+    └── dashboard.html       # Overview, Notifications, Locations, Supply Stock,
+                              # Reports & History, Settings
 ```
 
-## Setup Steps
+## Firestore Collections
+- `locations/{id}` — name, password, products (total ever supplied), currentStock (live running stock),
+  thresholds (per-product restock trigger), offDays
+- `locations/{id}/logs/{date}` — daily clock in/out + sales report
+- `supplyRequests/{id}` — admin-initiated stock additions awaiting merchandiser confirmation
+- `notifications/{id}` — low_stock, discrepancy, supply_disputed alerts for the admin
+- `admin/settings` — companyPassword, whatsappNumber
 
-### 1. Create a Firebase project
-1. Go to https://console.firebase.google.com → "Add project"
-2. Enable **Firestore Database** (start in test mode, then secure with rules below)
-3. Enable **Storage** (for clock-in/out photos)
-4. Go to Project Settings → General → "Your apps" → Web app → copy the config object
+## New in this version
+1. **Custom restock thresholds** — Admin → Supply Stock tab → "Set Restock Thresholds".
+   Set an exact unit count per product per location instead of a fixed 20%.
+2. **Full history for both sides** — Merchandiser History page now has Sales History and
+   Supply History tabs. Admin Reports tab has the same split.
+3. **Admin stock correction** — Admin → Supply Stock tab → "Edit / Correct Stock" lets the
+   admin directly overwrite currentStock figures to fix discrepancies.
+4. **Additive stock** — Confirmed supply requests add to existing currentStock rather than
+   overwriting it. Both admin and merchandiser see the live running total.
+5. **Supply confirmation flow** — When admin sends a supply, it goes into `supplyRequests`
+   with status `pending_confirmation` and is NOT yet added to stock. The merchandiser sees
+   a banner on their dashboard and must tap "Yes, I received this" (applies it to stock) or
+   "Not correct" (flags it as `disputed`, notifies admin). Admin can then correct & resend
+   or cancel from the "Pending/Disputed Supply Requests" panel.
 
-### 2. Add your config
-Open `shared/firebase-config.js` and replace the `firebaseConfig` placeholder values
-with your real project's config (apiKey, authDomain, projectId, etc).
+## Setup
+1. Firebase project already configured in `shared/firebase-config.js`.
+2. Make sure Firestore and Storage are enabled in the Firebase Console.
+3. Open `admin/index.html` first to set the admin password and add locations.
+4. Open `merchandiser/index.html` on merchandiser devices.
 
-### 3. Host the files
-Any static host works: Firebase Hosting, GitHub Pages (separate repos/folders for
-merchandiser and admin if you want different URLs), Netlify, or Vercel.
-
-### 4. First-time use
-- **Admin**: open `admin/index.html`. The first password you type becomes the
-  admin/company password — change it anytime in Settings.
-- **Admin → Locations tab**: add each supermarket location (this becomes a
-  login option on the merchandiser homepage). Default merchandiser password is "impu".
-- **Admin → Supply Stock tab**: enter the products supplied and quantities for each location.
-- **Merchandiser**: open `merchandiser/index.html`, pick their location, log in with
-  "impu" (or whatever password the admin set). On first login they'll set their off days.
-
-## How the discrepancy check works
-expected closing = opening stock − sold quantity
-If actual closing stock entered ≠ expected closing, the merchandiser is shown
-a discrepancy alert and must give a reason before submitting. This reason is
-visible to the admin in the Reports tab and on the Overview table.
-
-## Recommended Firestore Security Rules (basic starting point)
+## Recommended Firestore Security Rules (dev only — tighten for production)
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /locations/{locId} {
-      allow read: if true;
-      allow write: if true; // tighten with Firebase Auth for production
-      match /logs/{logId} {
-        allow read, write: if true;
-      }
-    }
-    match /admin/{doc} {
       allow read, write: if true;
+      match /logs/{logId} { allow read, write: if true; }
     }
+    match /supplyRequests/{id} { allow read, write: if true; }
+    match /notifications/{id} { allow read, write: if true; }
+    match /admin/{doc} { allow read, write: if true; }
   }
 }
 ```
-**Note:** These open rules are for development only. For production, add
-Firebase Authentication (e.g. anonymous auth + custom claims, or admin email/password)
-and restrict writes accordingly — especially the `admin/settings` and `products` fields,
-which only the admin should be able to edit.
-
-## Next features to build
-- Push notifications for flagged discrepancies
-- Export reports to Excel/CSV
-- Photo gallery view of clock-in/out images per location
-- Multi-admin roles
