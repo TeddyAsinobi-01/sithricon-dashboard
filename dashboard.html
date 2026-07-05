@@ -107,23 +107,39 @@
     <div class="card">
       <h2>Add Supply to a Location</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Enter quantity being <strong>added</strong> for each product. The merchandiser will be asked to confirm receipt before it's added to their stock.
+        Enter quantity being <strong>added</strong>. The merchandiser will confirm receipt before stock is updated.
       </p>
       <label>Select Location</label>
       <select id="stockLocationSelect"><option>Loading...</option></select>
       <div id="productInputs" style="margin-top:10px;"></div>
-      <div class="flex" style="margin-top:10px;">
-        <input type="text" id="newProductName" placeholder="New product name" style="margin-bottom:0;">
-        <button class="btn small yellow" onclick="addProductField()">Add Product</button>
+      <div class="flex" style="margin-top:8px;">
+        <input type="text" id="newProductName" placeholder="Product not in list? Add here" style="margin-bottom:0;">
+        <button class="btn small yellow" onclick="addProductField()">Add</button>
       </div>
-      <button class="btn yellow" style="margin-top:14px;" onclick="sendSupplyForConfirmation()">Send Supply for Confirmation</button>
+      <button class="btn yellow" style="margin-top:14px;" onclick="sendSupplyForConfirmation()">📤 Send for Confirmation</button>
       <div id="stockSavedMsg" class="alert success hidden">Supply sent to merchandiser for confirmation.</div>
+    </div>
+
+    <div class="card" style="border:2px solid var(--red);">
+      <h2>⚡ Direct Stock Add (Emergency)</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Use only if merchandiser is unavailable. Stock is added immediately without confirmation.
+      </p>
+      <label>Select Location</label>
+      <select id="directStockLocationSelect"><option>Loading...</option></select>
+      <div id="directStockInputs" style="margin-top:10px;"></div>
+      <div class="flex" style="margin-top:8px;">
+        <input type="text" id="directNewProductName" placeholder="Product not in list? Add here" style="margin-bottom:0;">
+        <button class="btn small yellow" onclick="addDirectStockField()">Add</button>
+      </div>
+      <button class="btn danger" style="margin-top:14px;" onclick="saveDirectStock()">⚡ Add Stock Directly</button>
+      <div id="directStockMsg" class="alert success hidden">Stock added directly to location.</div>
     </div>
 
     <div class="card">
       <h2>Set Restock Thresholds</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Set how many units should remain before the system flags this location as needing restock.
+        Set the exact unit count at which each product at a location should trigger a restock alert.
       </p>
       <label>Select Location</label>
       <select id="thresholdLocationSelect"><option>Loading...</option></select>
@@ -135,7 +151,7 @@
     <div class="card">
       <h2>Edit / Correct Stock (Discrepancy Fix)</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
-        Directly correct the current stock figure for a location — use this to fix mistakes or reconcile discrepancies.
+        Directly overwrite current stock figures for a location to correct mistakes.
       </p>
       <label>Select Location</label>
       <select id="editStockLocationSelect"><option>Loading...</option></select>
@@ -144,7 +160,6 @@
       <div id="editStockMsg" class="alert success hidden">Stock corrected.</div>
     </div>
 
-    <!-- Pending supply requests awaiting merchandiser confirmation -->
     <div class="card">
       <h2>Pending / Disputed Supply Requests</h2>
       <div id="pendingSupplyList"><p style="color:var(--gray); font-size:0.85rem;">No pending requests.</p></div>
@@ -205,6 +220,29 @@
       <button class="btn yellow" onclick="changeAdminPassword()">Update Admin Password</button>
       <div id="adminPwMsg" class="alert success hidden">Admin password updated.</div>
     </div>
+
+    <div class="card">
+      <h2>⏰ Lateness Threshold</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Set expected clock-in and clock-out times. Merchandisers who clock in/out after these times will be flagged as late.</p>
+      <label>Expected Clock-In Time</label>
+      <input type="time" id="latenessClockIn">
+      <label>Expected Clock-Out Time</label>
+      <input type="time" id="latenessClockOut">
+      <button class="btn yellow" onclick="saveLatenessThreshold()">Save Lateness Threshold</button>
+      <div id="latenessMsg" class="alert success hidden">Lateness threshold saved.</div>
+    </div>
+
+    <div class="card">
+      <h2>📦 Global Product List</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Add all products sold by Ithri here. They will appear automatically in the supply form for every location — no need to type them each time.</p>
+      <div id="globalProductsList" style="margin-bottom:10px;"></div>
+      <div class="flex">
+        <input type="text" id="newGlobalProduct" placeholder="e.g. Pineapple Juice 50cl" style="margin-bottom:0;">
+        <button class="btn small yellow" onclick="addGlobalProduct()">Add</button>
+      </div>
+      <div id="globalProductsMsg" class="alert success hidden" style="margin-top:8px;">Product list updated.</div>
+    </div>
+
     <div class="card">
       <h2>WhatsApp Restock Number</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Include country code, no + or spaces (e.g. 2348012345678).</p>
@@ -213,6 +251,7 @@
       <button class="btn yellow" onclick="saveWaNumberFromSettings()">Save Number</button>
       <div id="waSettingsSavedMsg" class="alert success hidden">WhatsApp number saved.</div>
     </div>
+
     <div class="card">
       <h2>Change Merchandiser Password</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Default is "impu". Set to the merchandiser's first and second name or any custom password.</p>
@@ -315,10 +354,12 @@ function renderTodayTable() {
       const lowStock = log.hasLowStock ? `<span class="badge red">⚠️ Low</span>` : '<span class="badge green">OK</span>';
       const discText = log.discrepancyReason ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>` : '-';
 
+      const inLate = adminLatenessThreshold && isLate(log.clockIn, adminLatenessThreshold.clockIn);
+      const outLate = adminLatenessThreshold && isLate(log.clockOut, adminLatenessThreshold.clockOut);
       row.innerHTML = `
         <td><strong>${loc.name}</strong></td>
-        <td>${log.clockIn ? `<strong>${log.clockIn}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockInDate||''}</span>` : '-'}</td>
-        <td>${log.clockOut ? `<strong>${log.clockOut}</strong><br><span style="font-size:0.75rem;color:var(--gray)">${log.clockOutDate||''}</span>` : '-'}</td>
+        <td>${log.clockIn ? `<strong style="color:${inLate?'var(--red)':'inherit'}">${log.clockIn}</strong>${inLate?' <span style="background:var(--red);color:#fff;border-radius:10px;font-size:0.68rem;padding:1px 6px;">Late</span>':''}<br><span style="font-size:0.75rem;color:var(--gray)">${log.clockInDate||''}</span>` : '-'}</td>
+        <td>${log.clockOut ? `<strong style="color:${outLate?'var(--red)':'inherit'}">${log.clockOut}</strong>${outLate?' <span style="background:var(--red);color:#fff;border-radius:10px;font-size:0.68rem;padding:1px 6px;">Late</span>':''}<br><span style="font-size:0.75rem;color:var(--gray)">${log.clockOutDate||''}</span>` : '-'}</td>
         <td>${inPhoto}</td><td>${outPhoto}</td><td>${statusBadge}</td><td>${lowStock}</td>
         <td style="max-width:160px; font-size:0.85rem;">${discText}</td>`;
       recomputeStats();
@@ -475,7 +516,7 @@ async function saveWaNumberFromSettings() {
 
 // ===== LOCATIONS TAB =====
 function populateLocationSelects() {
-  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect'].forEach(selId => {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
     const currentVal = sel.value;
     const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
@@ -842,9 +883,194 @@ async function changeMerchPassword() {
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
+// ===== LATENESS HELPERS =====
+let adminLatenessThreshold = null;
+let globalProducts = [];
+
+function isLate(timeStr, thresholdStr) {
+  if (!thresholdStr || !timeStr) return false;
+  const [th, tm] = thresholdStr.split(':').map(Number);
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m > th * 60 + tm;
+}
+
+async function saveLatenessThreshold() {
+  const clockIn = document.getElementById('latenessClockIn').value;
+  const clockOut = document.getElementById('latenessClockOut').value;
+  await db.collection('admin').doc('settings').set({ latenessThreshold: { clockIn, clockOut } }, { merge: true });
+  adminLatenessThreshold = { clockIn, clockOut };
+  const msg = document.getElementById('latenessMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== GLOBAL PRODUCTS =====
+async function loadGlobalProducts() {
+  const doc = await db.collection('admin').doc('settings').get();
+  if (doc.exists) {
+    globalProducts = doc.data().globalProducts || [];
+    adminLatenessThreshold = doc.data().latenessThreshold || null;
+    if (adminLatenessThreshold) {
+      const ci = document.getElementById('latenessClockIn');
+      const co = document.getElementById('latenessClockOut');
+      if (ci) ci.value = adminLatenessThreshold.clockIn || '';
+      if (co) co.value = adminLatenessThreshold.clockOut || '';
+    }
+    const wa = doc.data().whatsappNumber;
+    if (wa) {
+      const waEl = document.getElementById('waNumberSettings');
+      if (waEl) waEl.value = wa;
+    }
+  }
+  renderGlobalProductsList();
+}
+
+function renderGlobalProductsList() {
+  const el = document.getElementById('globalProductsList');
+  if (!el) return;
+  if (!globalProducts.length) {
+    el.innerHTML = '<div style="color:var(--gray); font-size:0.85rem; margin-bottom:6px;">No products added yet.</div>';
+    return;
+  }
+  el.innerHTML = globalProducts.map((p, i) => `
+    <div class="flex-between" style="padding:5px 0; border-bottom:1px solid var(--light-gray);">
+      <span>${p}</span>
+      <button class="btn small danger" onclick="removeGlobalProduct(${i})">✕</button>
+    </div>`).join('');
+}
+
+async function addGlobalProduct() {
+  const input = document.getElementById('newGlobalProduct');
+  const name = input.value.trim();
+  if (!name || globalProducts.includes(name)) { alert(name ? 'Already in list.' : 'Enter a product name.'); return; }
+  globalProducts.push(name);
+  await db.collection('admin').doc('settings').set({ globalProducts }, { merge: true });
+  input.value = '';
+  renderGlobalProductsList();
+  const msg = document.getElementById('globalProductsMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 2000);
+}
+
+async function removeGlobalProduct(i) {
+  globalProducts.splice(i, 1);
+  await db.collection('admin').doc('settings').set({ globalProducts }, { merge: true });
+  renderGlobalProductsList();
+}
+
+// ===== UPDATED renderProductInputs using global products =====
+document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
+
+function renderProductInputs() {
+  const locId = document.getElementById('stockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('productInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  const allProductSet = new Set([...globalProducts, ...Object.keys(loc.products || {}), ...Object.keys(current)]);
+  if (allProductSet.size === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet. Add them in Settings → Global Product List or use the field below.</p>';
+    return;
+  }
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (leave 0 to skip):</div>';
+  allProductSet.forEach(name => {
+    const currentQty = current[name] || 0;
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:10px; align-items:center;">
+        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current: ${currentQty}</div></div>
+        <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  });
+}
+
+function addProductField() {
+  const nameInput = document.getElementById('newProductName');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  const loc = allLocations.find(l => l.id === document.getElementById('stockLocationSelect').value);
+  const current = loc ? (loc.currentStock || {}) : {};
+  document.getElementById('productInputs').innerHTML += `
+    <div class="flex" style="margin-bottom:10px; align-items:center;">
+      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current: ${current[name] || 0}</div></div>
+      <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+    </div>`;
+  nameInput.value = '';
+}
+
+// ===== EMERGENCY DIRECT STOCK ADD =====
+document.getElementById('directStockLocationSelect').addEventListener('change', renderDirectStockInputs);
+
+function renderDirectStockInputs() {
+  const locId = document.getElementById('directStockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('directStockInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  const allProductSet = new Set([...globalProducts, ...Object.keys(current)]);
+  if (allProductSet.size === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet.</p>';
+    return;
+  }
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD directly:</div>';
+  allProductSet.forEach(name => {
+    const qty = current[name] || 0;
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:10px; align-items:center;">
+        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current: ${qty}</div></div>
+        <input type="number" min="0" value="0" data-direct-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  });
+}
+
+function addDirectStockField() {
+  const nameInput = document.getElementById('directNewProductName');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  document.getElementById('directStockInputs').innerHTML += `
+    <div class="flex" style="margin-bottom:10px; align-items:center;">
+      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">New product</div></div>
+      <input type="number" min="0" value="0" data-direct-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+    </div>`;
+  nameInput.value = '';
+}
+
+async function saveDirectStock() {
+  const locId = document.getElementById('directStockLocationSelect').value;
+  if (!locId) { alert('Please select a location.'); return; }
+  if (!confirm('This adds stock immediately without merchandiser confirmation. Proceed?')) return;
+  const loc = allLocations.find(l => l.id === locId);
+  const current = { ...(loc.currentStock || loc.products || {}) };
+  const supplied = { ...(loc.products || {}) };
+  const addedItems = {};
+  document.querySelectorAll('#directStockInputs input[data-direct-product]').forEach(input => {
+    const qty = parseFloat(input.value) || 0;
+    if (qty > 0) {
+      const name = input.dataset.directProduct;
+      current[name] = (current[name] || 0) + qty;
+      supplied[name] = (supplied[name] || 0) + qty;
+      addedItems[name] = qty;
+    }
+  });
+  if (Object.keys(addedItems).length === 0) { alert('Please enter at least one quantity.'); return; }
+  await db.collection('locations').doc(locId).update({ currentStock: current, products: supplied });
+  await db.collection('supplyRequests').add({
+    locationId: locId, locationName: loc.name, items: addedItems,
+    status: 'confirmed', addedByAdmin: true, bypassConfirmation: true,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  const msg = document.getElementById('directStockMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+  renderDirectStockInputs();
+}
+
 // ===== BOOT =====
 setupRealtimeOverview();
 setupRealtimeNotifications();
+loadGlobalProducts();
 </script>
 </body>
 </html>

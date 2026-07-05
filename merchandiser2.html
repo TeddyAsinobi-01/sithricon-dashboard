@@ -6,6 +6,16 @@
 <title>Ithri Fresh Juice - Merchandiser Login</title>
 <link rel="stylesheet" href="shared/style.css">
 <link rel="manifest" href="manifest.json">
+<style>
+  .search-wrap { position:relative; margin-bottom:8px; }
+  .search-wrap input { padding-left:36px; }
+  .search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--gray); pointer-events:none; }
+  .loc-dropdown { border:1px solid #ddd; border-radius:8px; overflow:hidden; background:var(--white); max-height:260px; overflow-y:auto; display:none; box-shadow:var(--shadow); margin-bottom:10px; }
+  .loc-dropdown.open { display:block; }
+  .loc-option { padding:13px 16px; border-bottom:1px solid var(--light-gray); cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:0.95rem; }
+  .loc-option:hover { background:#f0faf0; }
+  .loc-option:last-child { border-bottom:none; }
+</style>
 </head>
 <body>
 <header class="app-header">
@@ -15,8 +25,17 @@
 <div class="container">
   <div class="card">
     <h2>Select Your Location</h2>
-    <p style="color:var(--gray); font-size:0.85rem; margin-bottom:14px;">Tap your supermarket location below to log in.</p>
-    <div id="locationList" class="location-list"><div class="empty-state">Loading locations...</div></div>
+    <p style="color:var(--gray); font-size:0.85rem; margin-bottom:14px;">Search or select your supermarket location to log in.</p>
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="locationSearch" placeholder="Type to search location..." oninput="filterLocations()" onfocus="openDropdown()" autocomplete="off">
+    </div>
+    <div class="loc-dropdown" id="locationDropdown">
+      <div class="loc-option" style="color:var(--gray); cursor:default;">Loading locations...</div>
+    </div>
+    <div id="selectedDisplay" class="alert success hidden"></div>
+    <div id="loginError" class="alert error hidden">Please select a location first.</div>
+    <button class="btn yellow" onclick="proceedToLogin()">Continue →</button>
   </div>
 </div>
 
@@ -25,7 +44,7 @@
     <h3 id="modalLocationName">Location</h3>
     <p style="color:var(--gray); font-size:0.85rem; margin-bottom:14px;">Enter your password to continue</p>
     <input type="password" id="passwordInput" placeholder="Password" autocomplete="off">
-    <div id="loginError" class="alert error hidden">Incorrect password. Try again.</div>
+    <div id="pwError" class="alert error hidden">Incorrect password. Try again.</div>
     <div class="flex">
       <button class="btn outline" onclick="closeModal()">Cancel</button>
       <button class="btn yellow" onclick="attemptLogin()">Login</button>
@@ -38,38 +57,67 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="shared/firebase-config.js"></script>
 <script>
+let allLocations = [];
 let selectedLocation = null;
 
 async function loadLocations() {
-  const listEl = document.getElementById('locationList');
   try {
     const snap = await db.collection('locations').orderBy('name').get();
-    if (snap.empty) {
-      listEl.innerHTML = '<div class="empty-state">No locations have been added yet. Contact your admin.</div>';
-      return;
-    }
-    listEl.innerHTML = '';
-    snap.forEach(doc => {
-      const data = doc.data();
-      const item = document.createElement('div');
-      item.className = 'location-item';
-      item.innerHTML = `<span>${data.name}</span><span class="badge yellow">Login</span>`;
-      item.onclick = () => openModal(doc.id, data);
-      listEl.appendChild(item);
-    });
+    allLocations = [];
+    snap.forEach(doc => allLocations.push({ id: doc.id, ...doc.data() }));
+    renderDropdown(allLocations);
   } catch (e) {
-    listEl.innerHTML = '<div class="alert error">Could not load locations. Check connection.</div>';
+    document.getElementById('locationDropdown').innerHTML = '<div class="loc-option" style="color:var(--red);">Could not load locations. Check connection.</div>';
     console.error(e);
   }
 }
 
-function openModal(id, data) {
-  selectedLocation = { id, ...data };
-  document.getElementById('modalLocationName').textContent = data.name;
-  document.getElementById('passwordInput').value = '';
+function renderDropdown(list) {
+  const dropdown = document.getElementById('locationDropdown');
+  if (list.length === 0) {
+    dropdown.innerHTML = '<div class="loc-option" style="color:var(--gray); cursor:default;">No locations found.</div>';
+    return;
+  }
+  dropdown.innerHTML = list.map(loc =>
+    `<div class="loc-option" onclick="selectLocation('${loc.id}')">
+      <span>${loc.name}</span><span class="badge yellow" style="font-size:0.7rem;">Select</span>
+    </div>`).join('');
+}
+
+function filterLocations() {
+  const q = document.getElementById('locationSearch').value.toLowerCase();
+  renderDropdown(allLocations.filter(l => l.name.toLowerCase().includes(q)));
+  openDropdown();
+}
+
+function openDropdown() {
+  document.getElementById('locationDropdown').classList.add('open');
+}
+
+function selectLocation(id) {
+  selectedLocation = allLocations.find(l => l.id === id);
+  document.getElementById('locationSearch').value = selectedLocation.name;
+  document.getElementById('locationDropdown').classList.remove('open');
+  const disp = document.getElementById('selectedDisplay');
+  disp.textContent = '📍 Selected: ' + selectedLocation.name;
+  disp.classList.remove('hidden');
   document.getElementById('loginError').classList.add('hidden');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap') && !e.target.closest('.loc-dropdown')) {
+    document.getElementById('locationDropdown').classList.remove('open');
+  }
+});
+
+function proceedToLogin() {
+  if (!selectedLocation) { document.getElementById('loginError').classList.remove('hidden'); return; }
+  document.getElementById('modalLocationName').textContent = selectedLocation.name;
+  document.getElementById('passwordInput').value = '';
+  document.getElementById('pwError').classList.add('hidden');
   document.getElementById('passwordModal').classList.remove('hidden');
 }
+
 function closeModal() { document.getElementById('passwordModal').classList.add('hidden'); }
 
 async function attemptLogin() {
@@ -83,14 +131,11 @@ async function attemptLogin() {
       window.location.href = 'dashboard.html';
     }
   } else {
-    document.getElementById('loginError').classList.remove('hidden');
+    document.getElementById('pwError').classList.remove('hidden');
   }
 }
 
-document.getElementById('passwordInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') attemptLogin();
-});
-
+document.getElementById('passwordInput').addEventListener('keydown', e => { if (e.key === 'Enter') attemptLogin(); });
 loadLocations();
 </script>
 </body>
