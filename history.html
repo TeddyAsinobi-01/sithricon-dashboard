@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ithri - My History</title>
 <link rel="stylesheet" href="shared/style.css">
+<style>
+  .tbl-wrap { overflow-x:auto; margin-bottom:16px; }
+  .htable { min-width:620px; border-collapse:collapse; width:100%; font-size:0.82rem; }
+  .htable th { background:var(--green-dark); color:#fff; padding:9px 10px; text-align:left; white-space:nowrap; font-size:0.78rem; }
+  .htable td { padding:8px 10px; border-bottom:1px solid var(--light-gray); vertical-align:top; }
+  .htable tr:nth-child(even) td { background:#f9fdf9; }
+  .export-row { display:flex; justify-content:flex-end; margin-bottom:10px; }
+</style>
 </head>
 <body class="has-bottom-nav">
 <header class="app-header">
@@ -19,17 +27,56 @@
     <div class="tab" data-tab="supply">Supply History</div>
   </div>
 
+  <!-- SALES TAB -->
   <div id="tab-sales" class="tab-content">
-    <div class="stat-grid" style="margin-bottom:16px;">
+    <div class="stat-grid" style="margin-bottom:14px;">
       <div class="stat-box"><div class="num" id="totalDays">-</div><div class="label">Days Recorded</div></div>
       <div class="stat-box"><div class="num" id="totalSold">-</div><div class="label">Total Units Sold</div></div>
       <div class="stat-box"><div class="num" id="totalFlagged">-</div><div class="label">Flagged Days</div></div>
     </div>
-    <div id="historyList"><div class="card"><p>Loading...</p></div></div>
+    <div class="export-row">
+      <button class="btn small yellow" onclick="exportSalesCSV()">⬇️ Export to CSV</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="htable" id="salesTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Clock In</th>
+            <th>Clock Out</th>
+            <th>Product</th>
+            <th>Opening</th>
+            <th>Sold</th>
+            <th>Closing</th>
+            <th>Discrepancy</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="9" style="text-align:center;color:var(--gray);">Loading...</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
+  <!-- SUPPLY TAB -->
   <div id="tab-supply" class="tab-content hidden">
-    <div id="supplyList"><div class="card"><p>Loading...</p></div></div>
+    <div class="export-row">
+      <button class="btn small yellow" onclick="exportSupplyCSV()">⬇️ Export to CSV</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="htable" id="supplyTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Product</th>
+            <th>Amount Supplied</th>
+            <th>Amount Received</th>
+            <th>Discrepancy</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="6" style="text-align:center;color:var(--gray);">Loading...</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
 </div>
@@ -57,98 +104,133 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
+let salesData = [];
+let supplyData = [];
+
 async function loadSalesHistory() {
   const snap = await db.collection('locations').doc(session.locationId)
-    .collection('logs').orderBy('date', 'desc').limit(30).get();
+    .collection('logs').orderBy('date', 'desc').limit(60).get();
 
-  const listEl = document.getElementById('historyList');
+  const tbody = document.querySelector('#salesTable tbody');
+
   if (snap.empty) {
-    listEl.innerHTML = '<div class="card"><div class="empty-state">No records yet.</div></div>';
-    document.getElementById('totalDays').textContent = 0;
-    document.getElementById('totalSold').textContent = 0;
-    document.getElementById('totalFlagged').textContent = 0;
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray);">No records yet.</td></tr>';
+    ['totalDays','totalSold','totalFlagged'].forEach(id => document.getElementById(id).textContent = 0);
     return;
   }
 
-  let totalSoldUnits = 0, totalFlagged = 0, totalDays = 0, html = '';
+  let totalSoldUnits = 0, totalFlagged = 0, totalDays = 0;
+  const rows = [];
+  salesData = [];
 
   snap.forEach(doc => {
     const d = doc.data();
     totalDays++;
     if (d.status === 'flagged') totalFlagged++;
-    const daySold = d.soldQty ? Object.values(d.soldQty).reduce((a, b) => a + b, 0) : 0;
+    const daySold = d.soldQty ? Object.values(d.soldQty).reduce((a,b) => a+b, 0) : 0;
     totalSoldUnits += daySold;
 
-    let statusBadge = '<span class="badge gray">Pending</span>';
-    if (d.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
-    if (d.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
-
+    const statusLabel = d.status === 'submitted' ? 'Submitted' : d.status === 'flagged' ? 'Flagged' : 'Pending';
+    const statusColor = d.status === 'submitted' ? 'var(--green-main)' : d.status === 'flagged' ? 'var(--red)' : 'var(--gray)';
     const products = d.soldQty ? Object.keys(d.soldQty) : [];
-    const productRows = products.map(p => `
-      <div class="product-row">
-        <span>${p}</span>
-        <span>Sold: <strong>${d.soldQty[p]}</strong> &nbsp;|&nbsp; Closing: <strong>${d.closingStock?.[p] ?? '-'}</strong>
-        ${d.discrepancy?.[p] ? ` &nbsp;<span style="color:var(--red)">⚠️ diff: ${d.discrepancy[p].diff > 0 ? '+' : ''}${d.discrepancy[p].diff}</span>` : ''}</span>
-      </div>`).join('');
 
-    const cardClass = d.status === 'flagged' ? 'flagged' : d.status === 'submitted' ? '' : 'pending';
-
-    html += `
-      <div class="history-card ${cardClass}">
-        <div class="flex-between"><div style="font-weight:700; color:var(--green-dark);">📅 ${d.date}</div>${statusBadge}</div>
-        <div style="font-size:0.8rem; color:var(--gray); margin:6px 0;">🕐 In: ${d.clockIn || '-'} &nbsp;|&nbsp; Out: ${d.clockOut || '-'}</div>
-        ${products.length > 0 ? `
-          <div style="margin-bottom:4px; font-size:0.8rem; font-weight:600; color:var(--green-dark);">PRODUCTS</div>
-          ${productRows}
-          <div style="background:var(--light-gray); border-radius:8px; padding:10px; margin-top:8px; font-size:0.875rem;">Total sold today: <strong>${daySold} units</strong></div>`
-          : '<div style="color:var(--gray); font-size:0.85rem;">No stock report submitted.</div>'}
-        ${d.discrepancyReason ? `<div class="alert warn" style="margin-top:8px; font-size:0.85rem;"><strong>Discrepancy reason:</strong> ${d.discrepancyReason}</div>` : ''}
-        ${d.hasLowStock ? `<div class="alert warn" style="margin-top:8px; font-size:0.85rem;">📉 Low stock alert was raised on this day.</div>` : ''}
-      </div>`;
+    if (products.length === 0) {
+      rows.push(`<tr>
+        <td>${d.date}</td><td>${d.clockIn||'-'}</td><td>${d.clockOut||'-'}</td>
+        <td colspan="5" style="color:var(--gray);">No report submitted</td>
+        <td style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+      </tr>`);
+      salesData.push({ date:d.date, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', discrepancy:'', status:statusLabel });
+    } else {
+      products.forEach((product, idx) => {
+        const disc = d.discrepancy?.[product];
+        const discText = disc ? `${disc.diff>0?'+':''}${disc.diff}` : 'None';
+        const opening = d.openingStock?.[product] ?? '-';
+        rows.push(`<tr>
+          ${idx===0 ? `<td rowspan="${products.length}">${d.date}</td>
+            <td rowspan="${products.length}">${d.clockIn||'-'}</td>
+            <td rowspan="${products.length}">${d.clockOut||'-'}</td>` : ''}
+          <td>${product}</td>
+          <td>${opening}</td>
+          <td><strong>${d.soldQty[product]}</strong></td>
+          <td>${d.closingStock?.[product]??'-'}</td>
+          <td style="color:${disc?'var(--red)':'inherit'};">${discText}</td>
+          ${idx===0 ? `<td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>` : ''}
+        </tr>`);
+        salesData.push({ date:d.date, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', discrepancy:discText, status:statusLabel });
+      });
+    }
   });
 
   document.getElementById('totalDays').textContent = totalDays;
   document.getElementById('totalSold').textContent = totalSoldUnits;
   document.getElementById('totalFlagged').textContent = totalFlagged;
-  listEl.innerHTML = html;
+  tbody.innerHTML = rows.join('');
 }
 
 async function loadSupplyHistory() {
-  const listEl = document.getElementById('supplyList');
+  const tbody = document.querySelector('#supplyTable tbody');
   const snap = await db.collection('supplyRequests')
     .where('locationId', '==', session.locationId)
-    .orderBy('createdAt', 'desc')
-    .limit(30)
-    .get();
+    .orderBy('createdAt', 'desc').limit(60).get();
 
   if (snap.empty) {
-    listEl.innerHTML = '<div class="card"><div class="empty-state">No supply records yet.</div></div>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray);">No supply records yet.</td></tr>';
     return;
   }
 
-  let html = '';
+  const rows = [];
+  supplyData = [];
+
   snap.forEach(doc => {
     const d = doc.data();
-    const date = d.createdAt ? new Date(d.createdAt.toDate()).toLocaleString('en-GB') : '-';
+    const date = d.createdAt ? new Date(d.createdAt.toDate()).toLocaleDateString('en-GB') : '-';
+    const statusLabel = {confirmed:'Confirmed',disputed:'Disputed',cancelled:'Cancelled',pending_confirmation:'Awaiting Confirmation'}[d.status] || 'Pending';
+    const statusColor = d.status==='confirmed' ? 'var(--green-main)' : (d.status==='disputed'||d.status==='cancelled') ? 'var(--red)' : '#856404';
+    const products = Object.keys(d.items || {});
 
-    let statusBadge = '<span class="badge gray">Pending</span>';
-    if (d.status === 'confirmed') statusBadge = '<span class="badge green">Confirmed</span>';
-    if (d.status === 'disputed') statusBadge = '<span class="badge red">Disputed</span>';
-    if (d.status === 'cancelled') statusBadge = '<span class="badge red">Cancelled</span>';
-    if (d.status === 'pending_confirmation') statusBadge = '<span class="badge yellow">Awaiting Your Confirmation</span>';
-
-    const itemRows = Object.entries(d.items || {}).map(([p, q]) => `
-      <div class="product-row"><span>${p}</span><span><strong>+${q} units</strong></span></div>`).join('');
-
-    html += `
-      <div class="history-card supply">
-        <div class="flex-between"><div style="font-weight:700; color:#1565C0;">📦 Supply Record</div>${statusBadge}</div>
-        <div style="font-size:0.8rem; color:var(--gray); margin:6px 0;">${date}</div>
-        ${itemRows}
-      </div>`;
+    if (products.length === 0) {
+      rows.push(`<tr><td>${date}</td><td colspan="4" style="color:var(--gray);">No items</td><td style="color:${statusColor};font-weight:700;">${statusLabel}</td></tr>`);
+    } else {
+      products.forEach((product, idx) => {
+        const supplied = d.items[product];
+        const received = d.merchandiserReceivedItems?.[product];
+        const hasDisc = received != null && received !== supplied;
+        const discText = hasDisc ? `Received ${received} (expected ${supplied})` : 'None';
+        rows.push(`<tr>
+          ${idx===0 ? `<td rowspan="${products.length}">${date}</td>` : ''}
+          <td>${product}</td>
+          <td><strong>+${supplied}</strong></td>
+          <td>${received != null ? received : '-'}</td>
+          <td style="color:${hasDisc?'var(--red)':'inherit'};">${discText}</td>
+          ${idx===0 ? `<td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>` : ''}
+        </tr>`);
+        supplyData.push({ date, product, supplied, received:received??'', discrepancy:discText, status:statusLabel });
+      });
+    }
   });
 
-  listEl.innerHTML = html;
+  tbody.innerHTML = rows.join('');
+}
+
+function downloadCSV(filename, data, headers) {
+  const csv = [headers.join(','), ...data.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = filename;
+  a.click();
+}
+
+function exportSalesCSV() {
+  if (!salesData.length) { alert('No sales data to export.'); return; }
+  downloadCSV(`Ithri_Sales_${session.locationName}_${todayStr()}.csv`, salesData,
+    ['date','clockIn','clockOut','product','opening','sold','closing','discrepancy','status']);
+}
+
+function exportSupplyCSV() {
+  if (!supplyData.length) { alert('No supply data to export.'); return; }
+  downloadCSV(`Ithri_Supply_${session.locationName}_${todayStr()}.csv`, supplyData,
+    ['date','product','supplied','received','discrepancy','status']);
 }
 
 loadSalesHistory();

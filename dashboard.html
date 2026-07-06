@@ -179,14 +179,17 @@
         <h2>Filter</h2>
         <label>Location</label>
         <select id="reportLocationSelect"><option value="">All Locations</option></select>
-        <button class="btn small" onclick="loadReports()">Load Reports</button>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadReports()">Load Reports</button>
+          <button class="btn small yellow" onclick="exportAdminSalesCSV()">⬇️ Export CSV</button>
+        </div>
       </div>
       <div class="card">
         <h2>Sales & Attendance Logs</h2>
         <div style="overflow-x:auto;">
-          <table id="reportsTable">
-            <thead><tr><th>Date</th><th>Location</th><th>Clock In</th><th>Clock Out</th><th>Sold</th><th>Closing Stock</th><th>Low Stock</th><th>Status</th><th>Discrepancy Reason</th></tr></thead>
-            <tbody><tr><td colspan="9">Select a filter and click "Load Reports".</td></tr></tbody>
+          <table id="reportsTable" style="min-width:800px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Clock In</th><th>Clock Out</th><th>Product</th><th>Opening</th><th>Sold</th><th>Closing</th><th>Low Stock</th><th>Status</th><th>Discrepancy Reason</th></tr></thead>
+            <tbody><tr><td colspan="11">Select a filter and click "Load Reports".</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -197,14 +200,17 @@
         <h2>Filter</h2>
         <label>Location</label>
         <select id="supplyReportLocationSelect"><option value="">All Locations</option></select>
-        <button class="btn small" onclick="loadSupplyReports()">Load Supply History</button>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadSupplyReports()">Load Supply History</button>
+          <button class="btn small yellow" onclick="exportAdminSupplyCSV()">⬇️ Export CSV</button>
+        </div>
       </div>
       <div class="card">
         <h2>Supply Records</h2>
         <div style="overflow-x:auto;">
-          <table id="supplyReportsTable">
-            <thead><tr><th>Date</th><th>Location</th><th>Products Added</th><th>Status</th></tr></thead>
-            <tbody><tr><td colspan="4">Select a filter and click "Load Supply History".</td></tr></tbody>
+          <table id="supplyReportsTable" style="min-width:700px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Product</th><th>Amount Supplied</th><th>Amount Received</th><th>Discrepancy</th><th>Status</th></tr></thead>
+            <tbody><tr><td colspan="7">Select a filter and click "Load Supply History".</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -808,59 +814,119 @@ async function saveStockEdit() {
 }
 
 // ===== REPORTS TAB =====
+let adminSalesData = [];
+let adminSupplyData = [];
+
 async function loadReports() {
   const locId = document.getElementById('reportLocationSelect').value;
   const tbody = document.querySelector('#reportsTable tbody');
-  tbody.innerHTML = '<tr><td colspan="9">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11">Loading...</td></tr>';
   const locationsToQuery = locId ? allLocations.filter(l => l.id === locId) : allLocations;
   const rows = [];
+  adminSalesData = [];
 
   for (const loc of locationsToQuery) {
     const snap = await db.collection('locations').doc(loc.id).collection('logs').orderBy('date', 'desc').limit(30).get();
     snap.forEach(doc => {
       const d = doc.data();
-      const soldText = d.soldQty ? Object.entries(d.soldQty).map(([k,v]) => `${k}: ${v}`).join(', ') : '-';
-      const closingText = d.closingStock ? Object.entries(d.closingStock).map(([k,v]) => `${k}: ${v}`).join(', ') : '-';
-      const lowStockText = d.hasLowStock ? Object.entries(d.lowStockItems||{}).map(([k,v]) => `${k}: ${v.closing}u`).join(', ') : 'OK';
-      let statusBadge = '<span class="badge gray">Pending</span>';
-      if (d.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
-      if (d.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
+      const statusLabel = d.status === 'submitted' ? 'Submitted' : d.status === 'flagged' ? 'Flagged' : 'Pending';
+      const statusColor = d.status === 'submitted' ? 'var(--green-main)' : d.status === 'flagged' ? 'var(--red)' : 'var(--gray)';
+      const products = d.soldQty ? Object.keys(d.soldQty) : [];
+      const lowText = d.hasLowStock ? '⚠️ Yes' : 'No';
+      const lowColor = d.hasLowStock ? 'var(--red)' : 'inherit';
 
-      rows.push(`<tr>
-        <td>${d.date}</td><td>${loc.name}</td>
-        <td>${d.clockIn || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockInDate||''}</span></td>
-        <td>${d.clockOut || '-'}<br><span style="font-size:0.75rem;color:var(--gray)">${d.clockOutDate||''}</span></td>
-        <td>${soldText}</td><td>${closingText}</td>
-        <td style="color:${d.hasLowStock ? 'var(--red)' : 'var(--green-main)'};">${lowStockText}</td>
-        <td>${statusBadge}</td><td>${d.discrepancyReason || '-'}</td></tr>`);
+      if (products.length === 0) {
+        rows.push(`<tr>
+          <td>${d.date}</td><td>${loc.name}</td>
+          <td>${d.clockIn||'-'}</td><td>${d.clockOut||'-'}</td>
+          <td colspan="4" style="color:var(--gray);">No report</td>
+          <td style="color:${lowColor};">${lowText}</td>
+          <td style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+          <td>-</td></tr>`);
+        adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:'' });
+      } else {
+        products.forEach((product, idx) => {
+          const disc = d.discrepancy?.[product];
+          const discText = disc ? `${disc.diff>0?'+':''}${disc.diff}` : '-';
+          const opening = d.openingStock?.[product] ?? '-';
+          rows.push(`<tr>
+            ${idx===0 ? `<td rowspan="${products.length}">${d.date}</td>
+              <td rowspan="${products.length}">${loc.name}</td>
+              <td rowspan="${products.length}">${d.clockIn||'-'}</td>
+              <td rowspan="${products.length}">${d.clockOut||'-'}</td>` : ''}
+            <td>${product}</td>
+            <td>${opening}</td>
+            <td><strong>${d.soldQty[product]}</strong></td>
+            <td>${d.closingStock?.[product]??'-'}</td>
+            ${idx===0 ? `<td rowspan="${products.length}" style="color:${lowColor};">${lowText}</td>
+              <td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+              <td rowspan="${products.length}">${d.discrepancyReason||'-'}</td>` : ''}
+          </tr>`);
+          adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:d.discrepancyReason||'' });
+        });
+      }
     });
   }
-  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="9">No records found.</td></tr>';
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="11">No records found.</td></tr>';
 }
 
 async function loadSupplyReports() {
   const locId = document.getElementById('supplyReportLocationSelect').value;
   const tbody = document.querySelector('#supplyReportsTable tbody');
-  tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
 
-  let query = db.collection('supplyRequests').orderBy('createdAt', 'desc').limit(50);
-  const snap = await query.get();
+  const snap = await db.collection('supplyRequests').orderBy('createdAt', 'desc').limit(100).get();
   const rows = [];
+  adminSupplyData = [];
 
   snap.forEach(doc => {
     const d = doc.data();
     if (locId && d.locationId !== locId) return;
-    const date = d.createdAt ? new Date(d.createdAt.toDate()).toLocaleString('en-GB') : '-';
-    const items = Object.entries(d.items || {}).map(([p,q]) => `${p}: +${q}`).join(', ');
-    let statusBadge = '<span class="badge gray">Pending</span>';
-    if (d.status === 'confirmed') statusBadge = '<span class="badge green">Confirmed</span>';
-    if (d.status === 'disputed') statusBadge = '<span class="badge red">Disputed</span>';
-    if (d.status === 'cancelled') statusBadge = '<span class="badge red">Cancelled</span>';
-    if (d.status === 'pending_confirmation') statusBadge = '<span class="badge yellow">Awaiting Confirmation</span>';
-    rows.push(`<tr><td>${date}</td><td>${d.locationName}</td><td>${items}</td><td>${statusBadge}</td></tr>`);
-  });
+    const date = d.createdAt ? new Date(d.createdAt.toDate()).toLocaleDateString('en-GB') : '-';
+    const statusLabel = {confirmed:'Confirmed',disputed:'Disputed',cancelled:'Cancelled',pending_confirmation:'Awaiting Confirmation'}[d.status] || 'Pending';
+    const statusColor = d.status==='confirmed' ? 'var(--green-main)' : (d.status==='disputed'||d.status==='cancelled') ? 'var(--red)' : '#856404';
+    const products = Object.keys(d.items || {});
 
-  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="4">No supply records found.</td></tr>';
+    if (products.length === 0) {
+      rows.push(`<tr><td>${date}</td><td>${d.locationName}</td><td colspan="4" style="color:var(--gray);">No items</td><td style="color:${statusColor};font-weight:700;">${statusLabel}</td></tr>`);
+    } else {
+      products.forEach((product, idx) => {
+        const supplied = d.items[product];
+        const received = d.merchandiserReceivedItems?.[product];
+        const hasDisc = received != null && received !== supplied;
+        const discText = hasDisc ? `Received ${received} (expected ${supplied})` : 'None';
+        rows.push(`<tr>
+          ${idx===0 ? `<td rowspan="${products.length}">${date}</td><td rowspan="${products.length}">${d.locationName}</td>` : ''}
+          <td>${product}</td>
+          <td><strong>+${supplied}</strong></td>
+          <td>${received != null ? received : '-'}</td>
+          <td style="color:${hasDisc?'var(--red)':'inherit'};">${discText}</td>
+          ${idx===0 ? `<td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>` : ''}
+        </tr>`);
+        adminSupplyData.push({ date, location:d.locationName, product, supplied, received:received??'', discrepancy:discText, status:statusLabel });
+      });
+    }
+  });
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="7">No supply records found.</td></tr>';
+}
+
+function downloadCSV(filename, data, headers) {
+  const csv = [headers.join(','), ...data.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = filename; a.click();
+}
+
+function exportAdminSalesCSV() {
+  if (!adminSalesData.length) { alert('Load reports first.'); return; }
+  downloadCSV(`Ithri_Sales_All_${todayStr()}.csv`, adminSalesData,
+    ['date','location','clockIn','clockOut','product','opening','sold','closing','lowStock','status','discrepancyReason']);
+}
+
+function exportAdminSupplyCSV() {
+  if (!adminSupplyData.length) { alert('Load supply history first.'); return; }
+  downloadCSV(`Ithri_Supply_All_${todayStr()}.csv`, adminSupplyData,
+    ['date','location','product','supplied','received','discrepancy','status']);
 }
 
 // ===== SETTINGS TAB =====

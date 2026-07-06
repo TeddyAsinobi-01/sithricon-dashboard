@@ -16,6 +16,19 @@
 
   <div id="loadingMsg" class="card"><p>Loading today's products...</p></div>
 
+  <!-- Feature 1: Carry forward yesterday -->
+  <div id="carryForwardBanner" class="card hidden" style="border:2px solid #1565C0;">
+    <h3 style="color:#0d47a1; margin-bottom:8px;">📅 Missed Yesterday's Report?</h3>
+    <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+      It looks like yesterday's report was not submitted. You can carry forward yesterday's closing stock as today's opening stock.
+    </p>
+    <div id="yesterdayStockPreview" style="margin-bottom:12px;"></div>
+    <div class="flex">
+      <button class="btn yellow" onclick="carryForwardYesterday()">✅ Use Yesterday's Stock</button>
+      <button class="btn outline" onclick="dismissCarryForward()">Use Current Stock</button>
+    </div>
+  </div>
+
   <div id="mainContent" class="hidden">
     <div class="card">
       <h2>Today's Opening Stock</h2>
@@ -72,10 +85,12 @@ const session = getSession();
 if (!session.locationId) window.location.href = 'index.html';
 
 const today = todayStr();
+const yesterday = todayStr(new Date(Date.now() - 86400000));
 let openingStock = {};
 let suppliedStock = {};
 let thresholds = {};
 let calculatedData = null;
+let yesterdayClosingStock = null;
 
 async function init() {
   try {
@@ -101,6 +116,17 @@ async function init() {
       return;
     }
 
+    // Feature 1: Check if yesterday was missed
+    const yesterdayLogDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(yesterday).get();
+    const yesterdaySubmitted = yesterdayLogDoc.exists &&
+      (yesterdayLogDoc.data().status === 'submitted' || yesterdayLogDoc.data().status === 'flagged');
+
+    if (!yesterdaySubmitted && locationData.currentStock && Object.keys(locationData.currentStock).length > 0) {
+      yesterdayClosingStock = locationData.currentStock;
+      showCarryForwardBanner();
+      return;
+    }
+
     renderForms();
     document.getElementById('loadingMsg').classList.add('hidden');
     document.getElementById('mainContent').classList.remove('hidden');
@@ -108,6 +134,29 @@ async function init() {
     document.getElementById('loadingMsg').innerHTML = '<div class="alert error">Failed to load. Check your connection.</div>';
     console.error(e);
   }
+}
+
+function showCarryForwardBanner() {
+  const preview = document.getElementById('yesterdayStockPreview');
+  preview.innerHTML = Object.entries(yesterdayClosingStock).map(([p, q]) =>
+    `<div class="flex-between" style="padding:4px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
+      <span>${p}</span><strong>${q} units</strong>
+    </div>`).join('');
+  document.getElementById('loadingMsg').classList.add('hidden');
+  document.getElementById('carryForwardBanner').classList.remove('hidden');
+}
+
+function carryForwardYesterday() {
+  openingStock = { ...yesterdayClosingStock };
+  document.getElementById('carryForwardBanner').classList.add('hidden');
+  renderForms();
+  document.getElementById('mainContent').classList.remove('hidden');
+}
+
+function dismissCarryForward() {
+  document.getElementById('carryForwardBanner').classList.add('hidden');
+  renderForms();
+  document.getElementById('mainContent').classList.remove('hidden');
 }
 
 function getThreshold(product, supplied) {
