@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri Admin - Dashboard</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1><span class="logo-mark">Ithri</span> Admin Dashboard</h1>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <span style="font-size:1.2rem; cursor:pointer; position:relative;" onclick="switchTab('notifications')" title="Notifications">
+      🔔 <span id="notifCount" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px;">0</span>
+    </span>
+    <span style="font-size:0.85rem; cursor:pointer;" onclick="logout()">Logout</span>
+  </div>
+</header>
+
+<div class="container wide">
+
+  <div class="tabs">
+    <div class="tab active" data-tab="overview">Overview</div>
+    <div class="tab" data-tab="notifications">Notifications <span id="notifTabDot" class="notif-dot hidden"></span></div>
+    <div class="tab" data-tab="locations">Locations</div>
+    <div class="tab" data-tab="stock">Supply Stock</div>
+    <div class="tab" data-tab="reports">Reports & History</div>
+    <div class="tab" data-tab="settings">Settings</div>
+  </div>
+
+  <!-- OVERVIEW TAB -->
+  <div id="tab-overview" class="tab-content">
+    <div class="stat-grid">
+      <div class="stat-box"><div class="num" id="statLocations">-</div><div class="label">Locations</div></div>
+      <div class="stat-box"><div class="num" id="statClockedIn">-</div><div class="label">Clocked In Today</div></div>
+      <div class="stat-box"><div class="num" id="statSubmitted">-</div><div class="label">Submitted Today</div></div>
+      <div class="stat-box"><div class="num" id="statFlagged">-</div><div class="label">Flagged Today</div></div>
+    </div>
+    <div class="card">
+      <h2>Today's Activity — Real-Time</h2>
+      <div style="overflow-x:auto;">
+        <table id="todayTable">
+          <thead><tr><th>Location</th><th>Clock In</th><th>Clock Out</th><th>In Location</th><th>Out Location</th><th>Status</th><th>Low Stock</th><th>Discrepancy</th></tr></thead>
+          <tbody><tr><td colspan="8">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- NOTIFICATIONS TAB -->
+  <div id="tab-notifications" class="tab-content hidden">
+    <div class="flex-between" style="margin-bottom:12px;">
+      <h2 style="margin:0;">Notifications</h2>
+      <button class="btn small outline" onclick="markAllRead()">Mark all as read</button>
+    </div>
+
+    <div id="restockSummaryCard" class="card hidden" style="border:2px solid var(--yellow);">
+      <div class="flex-between" style="margin-bottom:10px;">
+        <h2 style="margin:0; color:#856404;">📋 Restock List</h2>
+        <span style="font-size:0.8rem; color:var(--gray);" id="restockDate"></span>
+      </div>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">All locations currently below their restock threshold:</p>
+      <div id="restockListItems"></div>
+      <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+        <button class="btn yellow" onclick="sendRestockToWhatsApp()">📲 Send to WhatsApp</button>
+        <button class="btn small outline" onclick="copyRestockList()">📋 Copy List</button>
+      </div>
+      <div style="margin-top:12px;">
+        <label>WhatsApp Number <span style="font-weight:400; color:var(--gray);">(with country code)</span></label>
+        <div class="flex">
+          <input type="tel" id="waNumberInline" placeholder="e.g. 2348012345678" style="margin-bottom:0;">
+          <button class="btn small yellow" onclick="saveWaNumber()">Save</button>
+        </div>
+        <div id="waNumSavedMsg" class="alert success hidden" style="margin-top:6px;">Number saved.</div>
+      </div>
+    </div>
+
+    <div id="notifList"><div class="empty-state">No notifications yet.</div></div>
+  </div>
+
+  <!-- LOCATIONS TAB -->
+  <div id="tab-locations" class="tab-content hidden">
+    <div class="card">
+      <h2>Add New Location</h2>
+      <label>Location Name</label>
+      <input type="text" id="newLocationName" placeholder="Enter location name">
+      <label>Merchandiser Name (optional)</label>
+      <input type="text" id="newMerchandiserName" placeholder="e.g. Mary Johnson">
+      <button class="btn yellow" onclick="addLocation()">Add Location</button>
+      <div id="addLocationMsg" class="alert success hidden">Location added successfully.</div>
+    </div>
+    <div class="card">
+      <h2>All Locations</h2>
+      <div id="locationsList"><p>Loading...</p></div>
+    </div>
+  </div>
+
+  <!-- STOCK SUPPLY TAB -->
+  <div id="tab-stock" class="tab-content hidden">
+
+    <div class="card">
+      <h2>Current Stock by Location</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:12px;">Live running stock per location, with restock thresholds.</p>
+      <div id="adminStockOverview"><p style="color:var(--gray);">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Add Supply to a Location</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Enter quantity being <strong>added</strong>. The merchandiser will confirm receipt before stock is updated.
+      </p>
+      <label>Select Location</label>
+      <select id="stockLocationSelect"><option>Loading...</option></select>
+      <div id="productInputs" style="margin-top:10px;"></div>
+      <div class="flex" style="margin-top:8px;">
+        <input type="text" id="newProductName" placeholder="Product not in list? Add here" style="margin-bottom:0;">
+        <button class="btn small yellow" onclick="addProductField()">Add</button>
+      </div>
+      <button class="btn yellow" style="margin-top:14px;" onclick="sendSupplyForConfirmation()">📤 Send for Confirmation</button>
+      <div id="stockSavedMsg" class="alert success hidden">Supply sent to merchandiser for confirmation.</div>
+    </div>
+
+    <div class="card" style="border:2px solid var(--red);">
+      <h2>⚡ Direct Stock Add (Emergency)</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Use only if merchandiser is unavailable. Stock is added immediately without confirmation.
+      </p>
+      <label>Select Location</label>
+      <select id="directStockLocationSelect"><option>Loading...</option></select>
+      <div id="directStockInputs" style="margin-top:10px;"></div>
+      <div class="flex" style="margin-top:8px;">
+        <input type="text" id="directNewProductName" placeholder="Product not in list? Add here" style="margin-bottom:0;">
+        <button class="btn small yellow" onclick="addDirectStockField()">Add</button>
+      </div>
+      <button class="btn danger" style="margin-top:14px;" onclick="saveDirectStock()">⚡ Add Stock Directly</button>
+      <div id="directStockMsg" class="alert success hidden">Stock added directly to location.</div>
+    </div>
+
+    <div class="card">
+      <h2>Set Restock Thresholds</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Set the exact unit count at which each product at a location should trigger a restock alert.
+      </p>
+      <label>Select Location</label>
+      <select id="thresholdLocationSelect"><option>Loading...</option></select>
+      <div id="thresholdInputs" style="margin-top:10px;"></div>
+      <button class="btn yellow" style="margin-top:14px;" onclick="saveThresholds()">Save Thresholds</button>
+      <div id="thresholdSavedMsg" class="alert success hidden">Thresholds saved.</div>
+    </div>
+
+    <div class="card">
+      <h2>Edit / Correct Stock (Discrepancy Fix)</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Directly overwrite current stock figures for a location to correct mistakes.
+      </p>
+      <label>Select Location</label>
+      <select id="editStockLocationSelect"><option>Loading...</option></select>
+      <div id="editStockInputs" style="margin-top:10px;"></div>
+      <button class="btn danger" style="margin-top:14px;" onclick="saveStockEdit()">Save Correction</button>
+      <div id="editStockMsg" class="alert success hidden">Stock corrected.</div>
+    </div>
+
+    <div class="card">
+      <h2>Pending / Disputed Supply Requests</h2>
+      <div id="pendingSupplyList"><p style="color:var(--gray); font-size:0.85rem;">No pending requests.</p></div>
+    </div>
+
+  </div>
+
+  <!-- REPORTS TAB -->
+  <div id="tab-reports" class="tab-content hidden">
+    <div class="tabs" style="margin-bottom:10px;">
+      <div class="tab active" data-subtab="sales">Sales History</div>
+      <div class="tab" data-subtab="supply">Supply History</div>
+    </div>
+
+    <div id="subtab-sales" class="subtab-content">
+      <div class="card">
+        <h2>Filter</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div>
+            <label>From Date</label>
+            <input type="date" id="salesFromDate" style="margin-bottom:0;">
+          </div>
+          <div>
+            <label>To Date</label>
+            <input type="date" id="salesToDate" style="margin-bottom:0;">
+          </div>
+        </div>
+        <label>Location</label>
+        <select id="reportLocationSelect" style="margin-bottom:10px;"><option value="">All Locations</option></select>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadReports()">Load Reports</button>
+          <button class="btn small yellow" onclick="exportAdminSalesCSV()">⬇️ Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Sales & Attendance Logs</h2>
+        <div style="overflow-x:auto;">
+          <table id="reportsTable" style="min-width:800px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Clock In</th><th>Clock Out</th><th>Product</th><th>Opening</th><th>Sold</th><th>Closing</th><th>Low Stock</th><th>Status</th><th>Discrepancy Reason</th></tr></thead>
+            <tbody><tr><td colspan="11" style="text-align:center; color:var(--gray);">Set filters and click "Load Reports".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="subtab-supply" class="subtab-content hidden">
+      <div class="card">
+        <h2>Filter</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div>
+            <label>From Date</label>
+            <input type="date" id="supplyFromDate" style="margin-bottom:0;">
+          </div>
+          <div>
+            <label>To Date</label>
+            <input type="date" id="supplyToDate" style="margin-bottom:0;">
+          </div>
+        </div>
+        <label>Location</label>
+        <select id="supplyReportLocationSelect" style="margin-bottom:10px;"><option value="">All Locations</option></select>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadSupplyReports()">Load Supply History</button>
+          <button class="btn small yellow" onclick="exportAdminSupplyCSV()">⬇️ Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Supply Records</h2>
+        <div style="overflow-x:auto;">
+          <table id="supplyReportsTable" style="min-width:700px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Product</th><th>Amount Supplied</th><th>Amount Received</th><th>Discrepancy</th><th>Status</th></tr></thead>
+            <tbody><tr><td colspan="7" style="text-align:center; color:var(--gray);">Set filters and click "Load Supply History".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div id="tab-settings" class="tab-content hidden">
+    <div class="card">
+      <h2>Change Admin (Company) Password</h2>
+      <label>New Password</label>
+      <input type="password" id="newAdminPassword" placeholder="Enter new password">
+      <button class="btn yellow" onclick="changeAdminPassword()">Update Admin Password</button>
+      <div id="adminPwMsg" class="alert success hidden">Admin password updated.</div>
+    </div>
+
+    <div class="card">
+      <h2>⏰ Lateness Threshold</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Set expected clock-in and clock-out times. Merchandisers who clock in/out after these times will be flagged as late.</p>
+      <label>Expected Clock-In Time</label>
+      <input type="time" id="latenessClockIn">
+      <label>Expected Clock-Out Time</label>
+      <input type="time" id="latenessClockOut">
+      <button class="btn yellow" onclick="saveLatenessThreshold()">Save Lateness Threshold</button>
+      <div id="latenessMsg" class="alert success hidden">Lateness threshold saved.</div>
+    </div>
+
+    <div class="card">
+      <h2>📦 Global Product List</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Add all products sold by Ithri here. They will appear automatically in the supply form for every location — no need to type them each time.</p>
+      <div id="globalProductsList" style="margin-bottom:10px;"></div>
+      <div class="flex">
+        <input type="text" id="newGlobalProduct" placeholder="e.g. Pineapple Juice 50cl" style="margin-bottom:0;">
+        <button class="btn small yellow" onclick="addGlobalProduct()">Add</button>
+      </div>
+      <div id="globalProductsMsg" class="alert success hidden" style="margin-top:8px;">Product list updated.</div>
+    </div>
+
+    <div class="card">
+      <h2>WhatsApp Restock Number</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Include country code, no + or spaces (e.g. 2348012345678).</p>
+      <label>WhatsApp Number</label>
+      <input type="tel" id="waNumberSettings" placeholder="e.g. 2348012345678">
+      <button class="btn yellow" onclick="saveWaNumberFromSettings()">Save Number</button>
+      <div id="waSettingsSavedMsg" class="alert success hidden">WhatsApp number saved.</div>
+    </div>
+
+    <div class="card">
+      <h2>Change Merchandiser Password</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Default is "impu". Set to the merchandiser's first and second name or any custom password.</p>
+      <label>Location</label>
+      <select id="merchPwLocationSelect"><option>Loading...</option></select>
+      <label>New Password</label>
+      <input type="text" id="merchPwNew" placeholder="e.g. MaryJohnson">
+      <button class="btn yellow" onclick="changeMerchPassword()">Update Password</button>
+      <div id="merchPwMsg" class="alert success hidden">Password updated.</div>
+    </div>
+  </div>
+
+</div>
+
+<div id="photoModal" class="photo-modal hidden" onclick="this.classList.add('hidden')">
+  <img id="photoModalImg" src="" alt="Clock photo">
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script>
+if (sessionStorage.getItem('ithri_admin_auth') !== 'true') window.location.href = 'index.html';
+function logout() { sessionStorage.removeItem('ithri_admin_auth'); window.location.href = 'index.html'; }
+
+// ===== TABS =====
+function switchTab(name) {
+  document.querySelectorAll('.tabs:not(.tabs ~ .tabs) > .tab').forEach(t => {});
+  document.querySelectorAll('#tab-overview, #tab-notifications, #tab-locations, #tab-stock, #tab-reports, #tab-settings').forEach(c => c.classList.add('hidden'));
+  document.querySelectorAll('.container.wide > .tabs > .tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.container.wide > .tabs > .tab[data-tab="${name}"]`).classList.add('active');
+  document.getElementById(`tab-${name}`).classList.remove('hidden');
+  if (name === 'notifications') markNotifsSeen();
+}
+document.querySelectorAll('.container.wide > .tabs > .tab').forEach(tab => {
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+});
+
+// Sub-tabs inside Reports
+document.querySelectorAll('.tab-content .tabs .tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const parent = tab.closest('.tabs');
+    parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.subtab-content').forEach(c => c.classList.add('hidden'));
+    document.getElementById(`subtab-${tab.dataset.subtab}`).classList.remove('hidden');
+  });
+});
+
+const today = todayStr();
+let allLocations = [];
+
+// ===== OVERVIEW REAL-TIME =====
+function setupRealtimeOverview() {
+  db.collection('locations').onSnapshot(snap => {
+    allLocations = [];
+    snap.forEach(doc => allLocations.push({ id: doc.id, ...doc.data() }));
+    document.getElementById('statLocations').textContent = allLocations.length;
+    populateLocationSelects();
+    renderTodayTable();
+    renderAdminStockOverview();
+  });
+}
+
+function getThreshold(loc, product) {
+  const supplied = (loc.products || {})[product] || 0;
+  return (loc.thresholds && loc.thresholds[product] != null) ? loc.thresholds[product] : Math.ceil(supplied * 0.2);
+}
+
+function renderTodayTable() {
+  const tbody = document.querySelector('#todayTable tbody');
+  if (allLocations.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8">No locations yet.</td></tr>';
+    document.getElementById('statClockedIn').textContent = 0;
+    document.getElementById('statSubmitted').textContent = 0;
+    document.getElementById('statFlagged').textContent = 0;
+    return;
+  }
+
+  const validIds = new Set(allLocations.map(l => l.id));
+  [...tbody.querySelectorAll('tr[id]')].forEach(row => {
+    if (!validIds.has(row.id.replace('row-',''))) row.remove();
+  });
+
+  allLocations.forEach(loc => {
+    db.collection('locations').doc(loc.id).collection('logs').doc(today).onSnapshot(logDoc => {
+      const log = logDoc.exists ? logDoc.data() : {};
+      const rowId = `row-${loc.id}`;
+      let row = document.getElementById(rowId);
+      if (!row) { row = document.createElement('tr'); row.id = rowId; tbody.appendChild(row); }
+
+      let statusBadge = '<span class="badge gray">Pending</span>';
+      if (log.status === 'submitted') statusBadge = '<span class="badge green">Submitted</span>';
+      if (log.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
+      if (log.status === 'in_progress') statusBadge = '<span class="badge yellow">In Progress</span>';
+
+      const inLoc = log.clockInLocation;
+      const outLoc = log.clockOutLocation;
+      const inPhoto = inLoc && inLoc.lat
+        ? `<a href="${inLoc.mapsUrl}" target="_blank" style="font-size:0.78rem; color:#1565C0;">📍 ${inLoc.lat},${inLoc.lng}<br><span style="color:var(--gray);">±${inLoc.accuracy}m</span></a>`
+        : (inLoc && inLoc.gpsError ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS</span>` : '-');
+      const outPhoto = outLoc && outLoc.lat
+        ? `<a href="${outLoc.mapsUrl}" target="_blank" style="font-size:0.78rem; color:#1565C0;">📍 ${outLoc.lat},${outLoc.lng}<br><span style="color:var(--gray);">±${outLoc.accuracy}m</span></a>`
+        : (outLoc && outLoc.gpsError ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS</span>` : '-');
+      const lowStock = log.hasLowStock ? `<span class="badge red">⚠️ Low</span>` : '<span class="badge green">OK</span>';
+      const discText = log.discrepancyReason ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>` : '-';
+
+      const inLate = adminLatenessThreshold && isLate(log.clockIn, adminLatenessThreshold.clockIn);
+      const outLate = adminLatenessThreshold && isLate(log.clockOut, adminLatenessThreshold.clockOut);
+      row.innerHTML = `
+        <td><strong>${loc.name}</strong></td>
+        <td>${log.clockIn ? `<strong style="color:${inLate?'var(--red)':'inherit'}">${log.clockIn}</strong>${inLate?' <span style="background:var(--red);color:#fff;border-radius:10px;font-size:0.68rem;padding:1px 6px;">Late</span>':''}<br><span style="font-size:0.75rem;color:var(--gray)">${log.clockInDate||''}</span>` : '-'}</td>
+        <td>${log.clockOut ? `<strong style="color:${outLate?'var(--red)':'inherit'}">${log.clockOut}</strong>${outLate?' <span style="background:var(--red);color:#fff;border-radius:10px;font-size:0.68rem;padding:1px 6px;">Late</span>':''}<br><span style="font-size:0.75rem;color:var(--gray)">${log.clockOutDate||''}</span>` : '-'}</td>
+        <td>${inPhoto}</td><td>${outPhoto}</td><td>${statusBadge}</td><td>${lowStock}</td>
+        <td style="max-width:160px; font-size:0.85rem;">${discText}</td>`;
+      recomputeStats();
+    });
+  });
+}
+
+function recomputeStats() {
+  const rows = [...document.querySelectorAll('#todayTable tbody tr[id]')];
+  let clockedIn = 0, submitted = 0, flagged = 0;
+  rows.forEach(row => {
+    const cells = row.children;
+    if (!cells.length) return;
+    if (cells[1] && cells[1].textContent.trim() !== '-') clockedIn++;
+    const status = cells[5] ? cells[5].textContent : '';
+    if (status.includes('Submitted')) submitted++;
+    if (status.includes('Flagged')) flagged++;
+  });
+  document.getElementById('statClockedIn').textContent = clockedIn;
+  document.getElementById('statSubmitted').textContent = submitted;
+  document.getElementById('statFlagged').textContent = flagged;
+}
+
+function openPhoto(url) {
+  document.getElementById('photoModalImg').src = url;
+  document.getElementById('photoModal').classList.remove('hidden');
+}
+
+// ===== NOTIFICATIONS REAL-TIME =====
+function setupRealtimeNotifications() {
+  db.collection('notifications').orderBy('createdAt', 'desc').limit(50).onSnapshot(snap => {
+    const notifList = document.getElementById('notifList');
+    let unread = 0;
+    const items = [];
+
+    snap.forEach(doc => {
+      const n = doc.data();
+      if (!n.read) unread++;
+      const time = n.createdAt ? new Date(n.createdAt.toDate()).toLocaleString('en-GB') : (n.date || '');
+      let body = '', cls = '';
+
+      if (n.type === 'low_stock') {
+        const itemLines = Object.entries(n.lowStockItems || {}).map(([p, d]) =>
+          `<li><strong>${p}</strong>: ${d.closing} units left (threshold ${d.threshold})</li>`).join('');
+        body = `<div style="font-weight:700; margin-bottom:6px;">📉 Low Stock — ${n.locationName}</div><ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>`;
+      } else if (n.type === 'discrepancy') {
+        cls = 'flagged';
+        body = `<div style="font-weight:700; margin-bottom:6px;">⚠️ Discrepancy — ${n.locationName}</div><div style="font-size:0.9rem;">Reason: ${n.reason}</div>`;
+      } else if (n.type === 'supply_disputed') {
+        cls = 'flagged';
+        const itemLines = Object.entries(n.items || {}).map(([p, q]) => `<li>${p}: ${q} units</li>`).join('');
+        body = `<div style="font-weight:700; margin-bottom:6px;">❌ Supply Disputed — ${n.locationName}</div>
+          <p style="font-size:0.85rem; margin-bottom:4px;">Merchandiser says this supply was not correct:</p>
+          <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
+          <p style="font-size:0.8rem; color:var(--gray); margin-top:4px;">Go to Supply Stock tab → Pending/Disputed Supply Requests to correct or cancel.</p>`;
+      }
+
+      items.push(`<div class="notif-item ${n.read ? 'read' : ''} ${cls}" id="notif-${doc.id}">
+        ${body}<div class="notif-time">${time}</div>
+        ${!n.read ? `<button class="btn small outline" style="margin-top:8px;" onclick="markRead('${doc.id}')">Mark as read</button>` : ''}
+      </div>`);
+    });
+
+    notifList.innerHTML = items.length ? items.join('') : '<div class="empty-state">No notifications yet.</div>';
+    buildRestockList();
+
+    const countEl = document.getElementById('notifCount');
+    const dotEl = document.getElementById('notifTabDot');
+    if (unread > 0) { countEl.textContent = unread; countEl.classList.remove('hidden'); dotEl.classList.remove('hidden'); }
+    else { countEl.classList.add('hidden'); dotEl.classList.add('hidden'); }
+  });
+}
+
+async function markRead(id) { await db.collection('notifications').doc(id).update({ read: true }); }
+async function markAllRead() {
+  const snap = await db.collection('notifications').where('read', '==', false).get();
+  const batch = db.batch();
+  snap.forEach(doc => batch.update(doc.ref, { read: true }));
+  await batch.commit();
+}
+function markNotifsSeen() { markAllRead(); }
+
+// ===== RESTOCK LIST (based on live currentStock vs thresholds) =====
+function buildRestockList() {
+  const lowLocations = allLocations.map(loc => {
+    const current = loc.currentStock || loc.products || {};
+    const items = Object.entries(current).filter(([p, qty]) => qty <= getThreshold(loc, p))
+      .map(([p, qty]) => ({ product: p, closing: qty, threshold: getThreshold(loc, p), supplied: (loc.products||{})[p] || qty }));
+    return { locationName: loc.name, items };
+  }).filter(l => l.items.length > 0);
+
+  const card = document.getElementById('restockSummaryCard');
+  const listEl = document.getElementById('restockListItems');
+  const dateEl = document.getElementById('restockDate');
+
+  if (lowLocations.length === 0) { card.classList.add('hidden'); return; }
+
+  card.classList.remove('hidden');
+  dateEl.textContent = 'as of ' + new Date().toLocaleDateString('en-GB');
+  window.currentRestockData = lowLocations;
+
+  listEl.innerHTML = lowLocations.map(loc => `
+    <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--light-gray);">
+      <div style="font-weight:700; color:var(--green-dark); margin-bottom:4px;">📍 ${loc.locationName}</div>
+      ${loc.items.map(item => `
+        <div style="display:flex; justify-content:space-between; font-size:0.9rem; padding:3px 0;">
+          <span>${item.product}</span>
+          <span style="color:var(--red); font-weight:600;">${item.closing} left (threshold ${item.threshold})</span>
+        </div>`).join('')}
+    </div>`).join('');
+
+  db.collection('admin').doc('settings').get().then(doc => {
+    if (doc.exists && doc.data().whatsappNumber) document.getElementById('waNumberInline').value = doc.data().whatsappNumber;
+  });
+}
+
+function buildRestockText() {
+  const date = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+  let text = `*ITHRI FRESH JUICE — RESTOCK REQUEST*\n📅 ${date}\n\n`;
+  (window.currentRestockData || []).forEach(loc => {
+    text += `📍 *${loc.locationName}*\n`;
+    loc.items.forEach(item => { text += `  • ${item.product}: ${item.closing} units remaining (threshold ${item.threshold})\n`; });
+    text += '\n';
+  });
+  text += '_Please arrange restock for the above locations._';
+  return text;
+}
+
+async function sendRestockToWhatsApp() {
+  let number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
+  if (!number) { alert('Please enter a WhatsApp number first.'); return; }
+  window.open(`https://wa.me/${number}?text=${encodeURIComponent(buildRestockText())}`, '_blank');
+}
+async function copyRestockList() {
+  try { await navigator.clipboard.writeText(buildRestockText()); alert('Restock list copied!'); }
+  catch(e) { alert('Could not copy.'); }
+}
+async function saveWaNumber() {
+  const number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
+  if (!number) return;
+  await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
+  document.getElementById('waNumberSettings').value = number;
+  const msg = document.getElementById('waNumSavedMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+async function saveWaNumberFromSettings() {
+  const number = document.getElementById('waNumberSettings').value.trim().replace(/\D/g, '');
+  if (!number) { alert('Please enter a number.'); return; }
+  await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
+  document.getElementById('waNumberInline').value = number;
+  const msg = document.getElementById('waSettingsSavedMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== LOCATIONS TAB =====
+function populateLocationSelects() {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect'].forEach(selId => {
+    const sel = document.getElementById(selId);
+    const currentVal = sel.value;
+    const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
+    sel.innerHTML = isAllOption ? '<option value="">All Locations</option>' : '';
+    allLocations.forEach(loc => {
+      const opt = document.createElement('option');
+      opt.value = loc.id; opt.textContent = loc.name;
+      sel.appendChild(opt);
+    });
+    if (currentVal) sel.value = currentVal;
+  });
+  renderLocationsList();
+  if (document.getElementById('stockLocationSelect').value) renderProductInputs();
+  if (document.getElementById('thresholdLocationSelect').value) renderThresholdInputs();
+  if (document.getElementById('editStockLocationSelect').value) renderEditStockInputs();
+  renderPendingSupplyList();
+}
+
+async function addLocation() {
+  const name = document.getElementById('newLocationName').value.trim();
+  const merchName = document.getElementById('newMerchandiserName').value.trim();
+  if (!name) { alert('Please enter a location name.'); return; }
+  await db.collection('locations').add({
+    name, merchandiserName: merchName, password: 'impu',
+    products: {}, currentStock: {}, thresholds: {}, offDays: [],
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  document.getElementById('newLocationName').value = '';
+  document.getElementById('newMerchandiserName').value = '';
+  const msg = document.getElementById('addLocationMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+function renderLocationsList() {
+  const listEl = document.getElementById('locationsList');
+  if (!allLocations.length) { listEl.innerHTML = '<div class="empty-state">No locations added yet.</div>'; return; }
+  listEl.innerHTML = allLocations.map(loc => {
+    const offDaysText = (loc.offDays && loc.offDays.length) ? loc.offDays.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ') : 'Works every day';
+    return `
+      <div class="location-item" style="cursor:default; margin-bottom:8px;">
+        <div>
+          <strong>${loc.name}</strong><br>
+          <span style="font-size:0.8rem; color:var(--gray);">
+            Merchandiser: ${loc.merchandiserName || '-'} &nbsp;|&nbsp; Off days: ${offDaysText} &nbsp;|&nbsp; Password: ${loc.password || 'impu'}
+          </span>
+        </div>
+        <button class="btn danger small" onclick="removeLocation('${loc.id}', '${loc.name.replace(/'/g,"\\'")}')">Remove</button>
+      </div>`;
+  }).join('');
+}
+
+async function removeLocation(id, name) {
+  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
+  await db.collection('locations').doc(id).delete();
+}
+
+// ===== STOCK OVERVIEW =====
+function renderAdminStockOverview() {
+  const el = document.getElementById('adminStockOverview');
+  if (!allLocations.length) { el.innerHTML = '<div class="empty-state">No locations yet.</div>'; return; }
+  el.innerHTML = allLocations.map(loc => {
+    const current = loc.currentStock || loc.products || {};
+    const supplied = loc.products || {};
+    const hasStock = Object.keys(current).length > 0;
+    const rows = hasStock ? Object.entries(current).map(([product, qty]) => {
+      const sup = supplied[product] || qty;
+      const threshold = getThreshold(loc, product);
+      const isLow = qty <= threshold;
+      return `<div class="flex-between" style="padding:5px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
+        <span>${product}</span>
+        <span style="font-weight:700; color:${isLow ? 'var(--red)' : 'var(--green-dark)'};">
+          ${qty} <span style="font-weight:400; color:var(--gray);">/ ${sup} (threshold ${threshold})</span>${isLow ? ' ⚠️' : ''}
+        </span></div>`;
+    }).join('') : '<div style="color:var(--gray); font-size:0.85rem;">No stock assigned yet.</div>';
+
+    return `<div style="margin-bottom:14px; padding-bottom:14px; border-bottom:2px solid var(--light-gray);">
+      <div style="font-weight:700; color:var(--green-dark); margin-bottom:6px;">📍 ${loc.name}</div>${rows}</div>`;
+  }).join('');
+}
+
+// ===== SUPPLY TAB (Feature 5: send for confirmation, not direct add) =====
+document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
+
+function renderProductInputs() {
+  const locId = document.getElementById('stockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('productInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  const supplied = loc.products || {};
+  const allProducts = new Set([...Object.keys(supplied), ...Object.keys(current)]);
+
+  if (allProducts.size === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet. Add one below.</p>';
+    return;
+  }
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (0 = skip):</div>';
+  allProducts.forEach(name => {
+    const currentQty = current[name] || 0;
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:10px; align-items:center;">
+        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current stock: ${currentQty}</div></div>
+        <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  });
+}
+
+function addProductField() {
+  const nameInput = document.getElementById('newProductName');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  const container = document.getElementById('productInputs');
+  container.innerHTML += `
+    <div class="flex" style="margin-bottom:10px; align-items:center;">
+      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">New product</div></div>
+      <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+    </div>`;
+  nameInput.value = '';
+}
+
+async function sendSupplyForConfirmation() {
+  const locId = document.getElementById('stockLocationSelect').value;
+  if (!locId) { alert('Please select a location.'); return; }
+  const loc = allLocations.find(l => l.id === locId);
+
+  const items = {};
+  document.querySelectorAll('#productInputs input[data-product]').forEach(input => {
+    const qty = parseFloat(input.value) || 0;
+    if (qty > 0) items[input.dataset.product] = qty;
+  });
+
+  if (Object.keys(items).length === 0) { alert('Please enter at least one quantity to add.'); return; }
+
+  // Register any brand-new product names in the location's products list at 0,
+  // so thresholds/UI can reference them even before confirmation.
+  const supplied = { ...(loc.products || {}) };
+  let needsProductUpdate = false;
+  for (const name of Object.keys(items)) {
+    if (!(name in supplied)) { supplied[name] = 0; needsProductUpdate = true; }
+  }
+  if (needsProductUpdate) await db.collection('locations').doc(locId).update({ products: supplied });
+
+  // Create a pending supply request — NOT applied to currentStock yet (Feature 5)
+  await db.collection('supplyRequests').add({
+    locationId: locId,
+    locationName: loc.name,
+    items,
+    status: 'pending_confirmation',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
+  // Update the "supplied" baseline total immediately so thresholds/% calculations stay meaningful
+  const newSupplied = { ...supplied };
+  for (const [name, qty] of Object.entries(items)) newSupplied[name] = (newSupplied[name] || 0) + qty;
+  await db.collection('locations').doc(locId).update({ products: newSupplied });
+
+  const msg = document.getElementById('stockSavedMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 4000);
+  renderProductInputs();
+}
+
+// ===== Pending/disputed supply requests management =====
+function renderPendingSupplyList() {
+  db.collection('supplyRequests')
+    .where('status', 'in', ['pending_confirmation', 'disputed'])
+    .onSnapshot(snap => {
+      const el = document.getElementById('pendingSupplyList');
+      if (snap.empty) { el.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No pending requests.</p>'; return; }
+
+      let html = '';
+      snap.forEach(doc => {
+        const d = doc.data();
+        const itemLines = Object.entries(d.items || {}).map(([p,q]) => `${p}: ${q}`).join(', ');
+        const isDisputed = d.status === 'disputed';
+
+        html += `
+          <div class="card" style="border-left:4px solid ${isDisputed ? 'var(--red)' : 'var(--yellow)'}; margin-bottom:10px;">
+            <div class="flex-between">
+              <strong>${d.locationName}</strong>
+              <span class="badge ${isDisputed ? 'red' : 'yellow'}">${isDisputed ? 'Disputed' : 'Awaiting Confirmation'}</span>
+            </div>
+            <div style="font-size:0.85rem; color:var(--gray); margin:6px 0;">${itemLines}</div>
+            ${isDisputed ? `
+              <div class="flex" style="margin-top:8px;">
+                <button class="btn small yellow" onclick="correctSupply('${doc.id}', '${d.locationId}')">Correct & Re-send</button>
+                <button class="btn small danger" onclick="cancelSupply('${doc.id}')">Cancel Supply</button>
+              </div>` : `
+              <button class="btn small outline" onclick="cancelSupply('${doc.id}')" style="margin-top:8px;">Cancel Request</button>`}
+          </div>`;
+      });
+      el.innerHTML = html;
+    });
+}
+
+async function cancelSupply(requestId) {
+  if (!confirm('Cancel this supply request?')) return;
+  await db.collection('supplyRequests').doc(requestId).update({
+    status: 'cancelled', cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function correctSupply(requestId, locationId) {
+  const newQty = prompt('Enter corrected quantities as "Product:Qty, Product2:Qty2" or cancel to leave unchanged:');
+  if (!newQty) return;
+  const items = {};
+  newQty.split(',').forEach(pair => {
+    const [name, qty] = pair.split(':').map(s => s.trim());
+    if (name && qty) items[name] = parseFloat(qty) || 0;
+  });
+  if (Object.keys(items).length === 0) { alert('No valid items entered.'); return; }
+
+  await db.collection('supplyRequests').doc(requestId).update({
+    items, status: 'pending_confirmation', correctedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  alert('Corrected supply sent back to merchandiser for confirmation.');
+}
+
+// ===== THRESHOLDS (Feature 1) =====
+document.getElementById('thresholdLocationSelect').addEventListener('change', renderThresholdInputs);
+
+function renderThresholdInputs() {
+  const locId = document.getElementById('thresholdLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('thresholdInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const products = loc.products || {};
+  const thresholds = loc.thresholds || {};
+
+  if (Object.keys(products).length === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products supplied to this location yet.</p>';
+    return;
+  }
+  Object.keys(products).forEach(name => {
+    const defaultThreshold = thresholds[name] != null ? thresholds[name] : Math.ceil(products[name] * 0.2);
+    container.innerHTML += `
+      <label>${name} — restock when stock falls to or below:</label>
+      <input type="number" min="0" value="${defaultThreshold}" data-threshold-product="${name}">`;
+  });
+}
+
+async function saveThresholds() {
+  const locId = document.getElementById('thresholdLocationSelect').value;
+  if (!locId) { alert('Select a location.'); return; }
+  const thresholds = {};
+  document.querySelectorAll('#thresholdInputs input[data-threshold-product]').forEach(input => {
+    thresholds[input.dataset.thresholdProduct] = parseFloat(input.value) || 0;
+  });
+  await db.collection('locations').doc(locId).update({ thresholds });
+  const msg = document.getElementById('thresholdSavedMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== EDIT/CORRECT STOCK (Feature 3) =====
+document.getElementById('editStockLocationSelect').addEventListener('change', renderEditStockInputs);
+
+function renderEditStockInputs() {
+  const locId = document.getElementById('editStockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('editStockInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  if (Object.keys(current).length === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No stock recorded yet for this location.</p>';
+    return;
+  }
+  Object.entries(current).forEach(([name, qty]) => {
+    container.innerHTML += `<label>${name} — corrected quantity:</label><input type="number" min="0" value="${qty}" data-edit-product="${name}">`;
+  });
+}
+
+async function saveStockEdit() {
+  const locId = document.getElementById('editStockLocationSelect').value;
+  if (!locId) { alert('Select a location.'); return; }
+  if (!confirm('This will directly overwrite the current stock figures. Continue?')) return;
+
+  const newCurrent = {};
+  document.querySelectorAll('#editStockInputs input[data-edit-product]').forEach(input => {
+    newCurrent[input.dataset.editProduct] = parseFloat(input.value) || 0;
+  });
+
+  await db.collection('locations').doc(locId).update({ currentStock: newCurrent });
+  const msg = document.getElementById('editStockMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== REPORTS TAB =====
+let adminSalesData = [];
+let adminSupplyData = [];
+
+// Set default date range to last 30 days on page load
+function setDefaultDateFilters() {
+  const today = new Date();
+  const prior = new Date(today); prior.setDate(prior.getDate() - 30);
+  const fmt = d => d.toISOString().split('T')[0];
+  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.value) el.value = id.includes('From') ? fmt(prior) : fmt(today);
+  });
+}
+
+async function loadReports() {
+  const locId = document.getElementById('reportLocationSelect').value;
+  const fromDate = document.getElementById('salesFromDate').value;
+  const toDate = document.getElementById('salesToDate').value;
+  const tbody = document.querySelector('#reportsTable tbody');
+  tbody.innerHTML = '<tr><td colspan="11">Loading...</td></tr>';
+
+  const locationsToQuery = locId ? allLocations.filter(l => l.id === locId) : allLocations;
+  let allEntries = []; // collect all entries across all locations, then sort by date
+  adminSalesData = [];
+
+  for (const loc of locationsToQuery) {
+    let query = db.collection('locations').doc(loc.id).collection('logs').orderBy('date', 'desc');
+    if (fromDate) query = query.where('date', '>=', fromDate);
+    if (toDate) query = query.where('date', '<=', toDate);
+    const snap = await query.limit(60).get();
+    snap.forEach(doc => allEntries.push({ loc, d: doc.data() }));
+  }
+
+  // Sort all entries by date descending across all locations
+  allEntries.sort((a, b) => b.d.date.localeCompare(a.d.date));
+
+  const rows = [];
+  allEntries.forEach(({ loc, d }) => {
+    const statusLabel = d.status === 'submitted' ? 'Submitted' : d.status === 'flagged' ? 'Flagged' : 'Pending';
+    const statusColor = d.status === 'submitted' ? 'var(--green-main)' : d.status === 'flagged' ? 'var(--red)' : 'var(--gray)';
+    const products = d.soldQty ? Object.keys(d.soldQty) : [];
+    const lowText = d.hasLowStock ? '⚠️ Yes' : 'No';
+    const lowColor = d.hasLowStock ? 'var(--red)' : 'inherit';
+
+    if (products.length === 0) {
+      rows.push(`<tr>
+        <td>${d.date}</td><td>${loc.name}</td>
+        <td>${d.clockIn||'-'}</td><td>${d.clockOut||'-'}</td>
+        <td colspan="4" style="color:var(--gray);">No report</td>
+        <td style="color:${lowColor};">${lowText}</td>
+        <td style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+        <td>-</td></tr>`);
+      adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:'' });
+    } else {
+      products.forEach((product, idx) => {
+        const disc = d.discrepancy?.[product];
+        const discText = disc ? `${disc.diff>0?'+':''}${disc.diff}` : '-';
+        const opening = d.openingStock?.[product] ?? '-';
+        rows.push(`<tr>
+          ${idx===0 ? `<td rowspan="${products.length}">${d.date}</td>
+            <td rowspan="${products.length}">${loc.name}</td>
+            <td rowspan="${products.length}">${d.clockIn||'-'}</td>
+            <td rowspan="${products.length}">${d.clockOut||'-'}</td>` : ''}
+          <td>${product}</td>
+          <td>${opening}</td>
+          <td><strong>${d.soldQty[product]}</strong></td>
+          <td>${d.closingStock?.[product]??'-'}</td>
+          ${idx===0 ? `<td rowspan="${products.length}" style="color:${lowColor};">${lowText}</td>
+            <td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+            <td rowspan="${products.length}">${d.discrepancyReason||'-'}</td>` : ''}
+        </tr>`);
+        adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:d.discrepancyReason||'' });
+      });
+    }
+  });
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="11" style="text-align:center; color:var(--gray);">No records found for selected filters.</td></tr>';
+}
+
+async function loadSupplyReports() {
+  const locId = document.getElementById('supplyReportLocationSelect').value;
+  const fromDate = document.getElementById('supplyFromDate').value;
+  const toDate = document.getElementById('supplyToDate').value;
+  const tbody = document.querySelector('#supplyReportsTable tbody');
+  tbody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+
+  let query = db.collection('supplyRequests').orderBy('createdAt', 'desc').limit(200);
+  const snap = await query.get();
+  const rows = [];
+  adminSupplyData = [];
+
+  // Collect + filter client-side (createdAt is a timestamp, not a string date)
+  let entries = [];
+  snap.forEach(doc => {
+    const d = doc.data();
+    if (locId && d.locationId !== locId) return;
+    const dateObj = d.createdAt ? d.createdAt.toDate() : null;
+    const dateStr = dateObj ? dateObj.toISOString().split('T')[0] : '';
+    if (fromDate && dateStr < fromDate) return;
+    if (toDate && dateStr > toDate) return;
+    entries.push({ d, dateStr, dateObj });
+  });
+
+  // Sort by date descending
+  entries.sort((a, b) => (b.dateObj||0) - (a.dateObj||0));
+
+  entries.forEach(({ d, dateStr }) => {
+    const date = dateStr ? new Date(dateStr).toLocaleDateString('en-GB') : '-';
+    const statusLabel = {confirmed:'Confirmed',disputed:'Disputed',cancelled:'Cancelled',pending_confirmation:'Awaiting Confirmation'}[d.status] || 'Pending';
+    const statusColor = d.status==='confirmed' ? 'var(--green-main)' : (d.status==='disputed'||d.status==='cancelled') ? 'var(--red)' : '#856404';
+    const products = Object.keys(d.items || {});
+
+    if (products.length === 0) {
+      rows.push(`<tr><td>${date}</td><td>${d.locationName}</td><td colspan="4" style="color:var(--gray);">No items</td><td style="color:${statusColor};font-weight:700;">${statusLabel}</td></tr>`);
+    } else {
+      products.forEach((product, idx) => {
+        const supplied = d.items[product];
+        const received = d.merchandiserReceivedItems?.[product];
+        const hasDisc = received != null && received !== supplied;
+        const discText = hasDisc ? `Received ${received} (expected ${supplied})` : 'None';
+        rows.push(`<tr>
+          ${idx===0 ? `<td rowspan="${products.length}">${date}</td><td rowspan="${products.length}">${d.locationName}</td>` : ''}
+          <td>${product}</td>
+          <td><strong>+${supplied}</strong></td>
+          <td>${received != null ? received : '-'}</td>
+          <td style="color:${hasDisc?'var(--red)':'inherit'};">${discText}</td>
+          ${idx===0 ? `<td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>` : ''}
+        </tr>`);
+        adminSupplyData.push({ date, location:d.locationName, product, supplied, received:received??'', discrepancy:discText, status:statusLabel });
+      });
+    }
+  });
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="7" style="text-align:center; color:var(--gray);">No records found for selected filters.</td></tr>';
+}
+
+function downloadCSV(filename, data, headers) {
+  const csv = [headers.join(','), ...data.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = filename; a.click();
+}
+
+function exportAdminSalesCSV() {
+  if (!adminSalesData.length) { alert('Load reports first.'); return; }
+  downloadCSV(`Ithri_Sales_All_${todayStr()}.csv`, adminSalesData,
+    ['date','location','clockIn','clockOut','product','opening','sold','closing','lowStock','status','discrepancyReason']);
+}
+
+function exportAdminSupplyCSV() {
+  if (!adminSupplyData.length) { alert('Load supply history first.'); return; }
+  downloadCSV(`Ithri_Supply_All_${todayStr()}.csv`, adminSupplyData,
+    ['date','location','product','supplied','received','discrepancy','status']);
+}
+
+// ===== SETTINGS TAB =====
+async function changeAdminPassword() {
+  const newPw = document.getElementById('newAdminPassword').value.trim();
+  if (!newPw) { alert('Enter a new password.'); return; }
+  await db.collection('admin').doc('settings').set({ companyPassword: newPw }, { merge: true });
+  document.getElementById('newAdminPassword').value = '';
+  const msg = document.getElementById('adminPwMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+async function changeMerchPassword() {
+  const locId = document.getElementById('merchPwLocationSelect').value;
+  const newPw = document.getElementById('merchPwNew').value.trim();
+  if (!locId || !newPw) { alert('Select a location and enter a new password.'); return; }
+  await db.collection('locations').doc(locId).update({ password: newPw });
+  document.getElementById('merchPwNew').value = '';
+  const msg = document.getElementById('merchPwMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== LATENESS HELPERS =====
+let adminLatenessThreshold = null;
+let globalProducts = [];
+
+function isLate(timeStr, thresholdStr) {
+  if (!thresholdStr || !timeStr) return false;
+  const [th, tm] = thresholdStr.split(':').map(Number);
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m > th * 60 + tm;
+}
+
+async function saveLatenessThreshold() {
+  const clockIn = document.getElementById('latenessClockIn').value;
+  const clockOut = document.getElementById('latenessClockOut').value;
+  await db.collection('admin').doc('settings').set({ latenessThreshold: { clockIn, clockOut } }, { merge: true });
+  adminLatenessThreshold = { clockIn, clockOut };
+  const msg = document.getElementById('latenessMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== GLOBAL PRODUCTS =====
+async function loadGlobalProducts() {
+  const doc = await db.collection('admin').doc('settings').get();
+  if (doc.exists) {
+    globalProducts = doc.data().globalProducts || [];
+    adminLatenessThreshold = doc.data().latenessThreshold || null;
+    if (adminLatenessThreshold) {
+      const ci = document.getElementById('latenessClockIn');
+      const co = document.getElementById('latenessClockOut');
+      if (ci) ci.value = adminLatenessThreshold.clockIn || '';
+      if (co) co.value = adminLatenessThreshold.clockOut || '';
+    }
+    const wa = doc.data().whatsappNumber;
+    if (wa) {
+      const waEl = document.getElementById('waNumberSettings');
+      if (waEl) waEl.value = wa;
+    }
+  }
+  renderGlobalProductsList();
+}
+
+function renderGlobalProductsList() {
+  const el = document.getElementById('globalProductsList');
+  if (!el) return;
+  if (!globalProducts.length) {
+    el.innerHTML = '<div style="color:var(--gray); font-size:0.85rem; margin-bottom:6px;">No products added yet.</div>';
+    return;
+  }
+  el.innerHTML = globalProducts.map((p, i) => `
+    <div class="flex-between" style="padding:5px 0; border-bottom:1px solid var(--light-gray);">
+      <span>${p}</span>
+      <button class="btn small danger" onclick="removeGlobalProduct(${i})">✕</button>
+    </div>`).join('');
+}
+
+async function addGlobalProduct() {
+  const input = document.getElementById('newGlobalProduct');
+  const name = input.value.trim();
+  if (!name || globalProducts.includes(name)) { alert(name ? 'Already in list.' : 'Enter a product name.'); return; }
+  globalProducts.push(name);
+  await db.collection('admin').doc('settings').set({ globalProducts }, { merge: true });
+  input.value = '';
+  renderGlobalProductsList();
+  const msg = document.getElementById('globalProductsMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 2000);
+}
+
+async function removeGlobalProduct(i) {
+  globalProducts.splice(i, 1);
+  await db.collection('admin').doc('settings').set({ globalProducts }, { merge: true });
+  renderGlobalProductsList();
+}
+
+// ===== UPDATED renderProductInputs using global products =====
+document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
+
+function renderProductInputs() {
+  const locId = document.getElementById('stockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('productInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  const allProductSet = new Set([...globalProducts, ...Object.keys(loc.products || {}), ...Object.keys(current)]);
+  if (allProductSet.size === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet. Add them in Settings → Global Product List or use the field below.</p>';
+    return;
+  }
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (leave 0 to skip):</div>';
+  allProductSet.forEach(name => {
+    const currentQty = current[name] || 0;
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:10px; align-items:center;">
+        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current: ${currentQty}</div></div>
+        <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  });
+}
+
+function addProductField() {
+  const nameInput = document.getElementById('newProductName');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  const loc = allLocations.find(l => l.id === document.getElementById('stockLocationSelect').value);
+  const current = loc ? (loc.currentStock || {}) : {};
+  document.getElementById('productInputs').innerHTML += `
+    <div class="flex" style="margin-bottom:10px; align-items:center;">
+      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current: ${current[name] || 0}</div></div>
+      <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+    </div>`;
+  nameInput.value = '';
+}
+
+// ===== EMERGENCY DIRECT STOCK ADD =====
+document.getElementById('directStockLocationSelect').addEventListener('change', renderDirectStockInputs);
+
+function renderDirectStockInputs() {
+  const locId = document.getElementById('directStockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('directStockInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  const allProductSet = new Set([...globalProducts, ...Object.keys(current)]);
+  if (allProductSet.size === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet.</p>';
+    return;
+  }
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD directly:</div>';
+  allProductSet.forEach(name => {
+    const qty = current[name] || 0;
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:10px; align-items:center;">
+        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current: ${qty}</div></div>
+        <input type="number" min="0" value="0" data-direct-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  });
+}
+
+function addDirectStockField() {
+  const nameInput = document.getElementById('directNewProductName');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  document.getElementById('directStockInputs').innerHTML += `
+    <div class="flex" style="margin-bottom:10px; align-items:center;">
+      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">New product</div></div>
+      <input type="number" min="0" value="0" data-direct-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+    </div>`;
+  nameInput.value = '';
+}
+
+async function saveDirectStock() {
+  const locId = document.getElementById('directStockLocationSelect').value;
+  if (!locId) { alert('Please select a location.'); return; }
+  if (!confirm('This adds stock immediately without merchandiser confirmation. Proceed?')) return;
+  const loc = allLocations.find(l => l.id === locId);
+  const current = { ...(loc.currentStock || loc.products || {}) };
+  const supplied = { ...(loc.products || {}) };
+  const addedItems = {};
+  document.querySelectorAll('#directStockInputs input[data-direct-product]').forEach(input => {
+    const qty = parseFloat(input.value) || 0;
+    if (qty > 0) {
+      const name = input.dataset.directProduct;
+      current[name] = (current[name] || 0) + qty;
+      supplied[name] = (supplied[name] || 0) + qty;
+      addedItems[name] = qty;
+    }
+  });
+  if (Object.keys(addedItems).length === 0) { alert('Please enter at least one quantity.'); return; }
+  await db.collection('locations').doc(locId).update({ currentStock: current, products: supplied });
+  await db.collection('supplyRequests').add({
+    locationId: locId, locationName: loc.name, items: addedItems,
+    status: 'confirmed', addedByAdmin: true, bypassConfirmation: true,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  const msg = document.getElementById('directStockMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+  renderDirectStockInputs();
+}
+
+// ===== BOOT =====
+setupRealtimeOverview();
+setupRealtimeNotifications();
+setDefaultDateFilters();
+loadGlobalProducts();
+</script>
+</body>
+</html>

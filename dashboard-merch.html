@@ -72,8 +72,7 @@
       <div class="clock-box" id="clockInBox">
         <h3>🟢 Clock In</h3>
         <div id="clockInSection">
-          <input type="file" accept="image/*" capture="environment" id="clockInPhoto">
-          <img id="clockInPreview" class="hidden">
+          <div id="clockInGpsStatus" style="font-size:0.78rem; color:var(--gray); margin-bottom:8px;">📍 Location will be captured on clock in</div>
           <button class="btn yellow" onclick="submitClockIn()">Clock In</button>
         </div>
         <div id="clockedInInfo" class="hidden">
@@ -88,8 +87,7 @@
         <div id="clockOutSection">
           <div id="clockOutNotReady" style="font-size:0.8rem; color:var(--gray); padding:10px 0;">Clock in first</div>
           <div id="clockOutReady" class="hidden">
-            <input type="file" accept="image/*" capture="environment" id="clockOutPhoto">
-            <img id="clockOutPreview" class="hidden">
+            <div id="clockOutGpsStatus" style="font-size:0.78rem; color:var(--gray); margin-bottom:8px;">📍 Location will be captured on clock out</div>
             <button class="btn outline" onclick="submitClockOut()">Clock Out</button>
           </div>
         </div>
@@ -326,35 +324,61 @@ function renderClockState() {
 }
 
 // ===== Photo preview =====
-document.getElementById('clockInPhoto').addEventListener('change', e => previewImage(e, 'clockInPreview'));
-document.getElementById('clockOutPhoto').addEventListener('change', e => previewImage(e, 'clockOutPreview'));
+// ===== GPS helper =====
+function getGPSLocation() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve({ lat: null, lng: null, accuracy: null, error: 'Geolocation not supported' });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({
+        lat: pos.coords.latitude.toFixed(6),
+        lng: pos.coords.longitude.toFixed(6),
+        accuracy: Math.round(pos.coords.accuracy),
+        error: null
+      }),
+      err => resolve({ lat: null, lng: null, accuracy: null, error: err.message }),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  });
+}
 
-function previewImage(e, previewId) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const img = document.getElementById(previewId);
-    img.src = ev.target.result;
-    img.classList.remove('hidden');
-  };
-  reader.readAsDataURL(file);
+function mapsLink(lat, lng) {
+  return lat ? `https://maps.google.com/?q=${lat},${lng}` : null;
 }
 
 // ===== Clock in =====
 async function submitClockIn() {
-  const file = document.getElementById('clockInPhoto').files[0];
-  if (!file) { alert('Please take a clock-in photo first.'); return; }
-  const btn = event.target; btn.disabled = true; btn.textContent = 'Uploading...';
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Getting location...';
+  const statusEl = document.getElementById('clockInGpsStatus');
+  statusEl.textContent = '📍 Getting your location...';
+
   try {
-    const meta = await getImageMetadata(file);
-    const photoUrl = await uploadImage(file, `clockins/${session.locationId}/${today}_in.jpg`);
+    const now = new Date();
+    const time = nowTimeStr(now);
+    const date = todayStr(now);
+    const gps = await getGPSLocation();
+
+    const clockInLocation = {
+      lat: gps.lat, lng: gps.lng,
+      accuracy: gps.accuracy,
+      mapsUrl: mapsLink(gps.lat, gps.lng),
+      gpsError: gps.error || null
+    };
+
     const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
     await logRef.set({
-      date: today, locationId: session.locationId, locationName: session.locationName,
-      clockIn: meta.time, clockInDate: meta.date, clockInPhoto: photoUrl, status: 'in_progress'
+      date, locationId: session.locationId, locationName: session.locationName,
+      clockIn: time, clockInDate: date, clockInLocation, status: 'in_progress'
     }, { merge: true });
-    todayLog = { clockIn: meta.time };
+
+    statusEl.textContent = gps.error
+      ? '⚠️ Location unavailable — time recorded'
+      : `📍 ${gps.lat}, ${gps.lng} (±${gps.accuracy}m)`;
+
+    todayLog = { clockIn: time };
     renderClockState();
   } catch (e) {
     alert('Failed to clock in. Check your connection.');
@@ -370,15 +394,33 @@ async function submitClockOut() {
     alert('⚠️ Please submit your stock and sales report before clocking out.');
     return;
   }
-  const file = document.getElementById('clockOutPhoto').files[0];
-  if (!file) { alert('Please take a clock-out photo first.'); return; }
-  const btn = event.target; btn.disabled = true; btn.textContent = 'Uploading...';
+
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Getting location...';
+  const statusEl = document.getElementById('clockOutGpsStatus');
+  statusEl.textContent = '📍 Getting your location...';
+
   try {
-    const meta = await getImageMetadata(file);
-    const photoUrl = await uploadImage(file, `clockouts/${session.locationId}/${today}_out.jpg`);
+    const now = new Date();
+    const time = nowTimeStr(now);
+    const date = todayStr(now);
+    const gps = await getGPSLocation();
+
+    const clockOutLocation = {
+      lat: gps.lat, lng: gps.lng,
+      accuracy: gps.accuracy,
+      mapsUrl: mapsLink(gps.lat, gps.lng),
+      gpsError: gps.error || null
+    };
+
     const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
-    await logRef.set({ clockOut: meta.time, clockOutDate: meta.date, clockOutPhoto: photoUrl }, { merge: true });
-    todayLog = { ...todayLog, clockOut: meta.time };
+    await logRef.set({ clockOut: time, clockOutDate: date, clockOutLocation }, { merge: true });
+
+    statusEl.textContent = gps.error
+      ? '⚠️ Location unavailable — time recorded'
+      : `📍 ${gps.lat}, ${gps.lng} (±${gps.accuracy}m)`;
+
+    todayLog = { ...todayLog, clockOut: time };
     renderClockState();
   } catch (e) {
     alert('Failed to clock out. Check your connection.');
