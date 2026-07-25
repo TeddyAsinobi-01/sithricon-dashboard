@@ -73,7 +73,7 @@
         <h3>🟢 Clock In</h3>
         <div id="clockInSection">
           <div id="clockInGpsStatus" style="font-size:0.78rem; color:var(--gray); margin-bottom:8px;">📍 Location will be captured on clock in</div>
-          <button class="btn yellow" onclick="submitClockIn()">Clock In</button>
+          <button class="btn yellow" onclick="submitClockIn(event)">Clock In</button>
         </div>
         <div id="clockedInInfo" class="hidden">
           <div class="clock-time" id="clockInTimeDisplay">--:--</div>
@@ -88,7 +88,7 @@
           <div id="clockOutNotReady" style="font-size:0.8rem; color:var(--gray); padding:10px 0;">Clock in first</div>
           <div id="clockOutReady" class="hidden">
             <div id="clockOutGpsStatus" style="font-size:0.78rem; color:var(--gray); margin-bottom:8px;">📍 Location will be captured on clock out</div>
-            <button class="btn outline" onclick="submitClockOut()">Clock Out</button>
+            <button class="btn outline" onclick="submitClockOut(event)">Clock Out</button>
           </div>
         </div>
         <div id="clockedOutInfo" class="hidden">
@@ -323,7 +323,6 @@ function renderClockState() {
   }
 }
 
-// ===== Photo preview =====
 // ===== GPS helper =====
 function getGPSLocation() {
   return new Promise((resolve) => {
@@ -349,9 +348,10 @@ function mapsLink(lat, lng) {
 }
 
 // ===== Clock in =====
-async function submitClockIn() {
-  const btn = event.target;
-  btn.disabled = true; btn.textContent = 'Getting location...';
+async function submitClockIn(e) {
+  const btn = (e && e.target) ? e.target : document.querySelector('#clockInSection .btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Getting location...'; }
+  
   const statusEl = document.getElementById('clockInGpsStatus');
   statusEl.textContent = '📍 Getting your location...';
 
@@ -380,14 +380,15 @@ async function submitClockIn() {
 
     todayLog = { clockIn: time };
     renderClockState();
-  } catch (e) {
+  } catch (err) {
     alert('Failed to clock in. Check your connection.');
-    console.error(e); btn.disabled = false; btn.textContent = 'Clock In';
+    console.error(err); 
+    if (btn) { btn.disabled = false; btn.textContent = 'Clock In'; }
   }
 }
 
 // ===== Clock out — report must be submitted first =====
-async function submitClockOut() {
+async function submitClockOut(e) {
   const logDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(today).get();
   const logData = logDoc.exists ? logDoc.data() : {};
   if (logData.status !== 'submitted' && logData.status !== 'flagged') {
@@ -395,8 +396,9 @@ async function submitClockOut() {
     return;
   }
 
-  const btn = event.target;
-  btn.disabled = true; btn.textContent = 'Getting location...';
+  const btn = (e && e.target) ? e.target : document.querySelector('#clockOutReady .btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Getting location...'; }
+  
   const statusEl = document.getElementById('clockOutGpsStatus');
   statusEl.textContent = '📍 Getting your location...';
 
@@ -422,9 +424,10 @@ async function submitClockOut() {
 
     todayLog = { ...todayLog, clockOut: time };
     renderClockState();
-  } catch (e) {
+  } catch (err) {
     alert('Failed to clock out. Check your connection.');
-    console.error(e); btn.disabled = false; btn.textContent = 'Clock Out';
+    console.error(err); 
+    if (btn) { btn.disabled = false; btn.textContent = 'Clock Out'; }
   }
 }
 
