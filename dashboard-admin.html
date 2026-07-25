@@ -305,9 +305,13 @@
 if (sessionStorage.getItem('ithri_admin_auth') !== 'true') window.location.href = 'index.html';
 function logout() { sessionStorage.removeItem('ithri_admin_auth'); window.location.href = 'index.html'; }
 
+function todayStr() {
+  const d = new Date();
+  return d.toISOString().split('T')[0];
+}
+
 // ===== TABS =====
 function switchTab(name) {
-  document.querySelectorAll('.tabs:not(.tabs ~ .tabs) > .tab').forEach(t => {});
   document.querySelectorAll('#tab-overview, #tab-notifications, #tab-locations, #tab-stock, #tab-reports, #tab-settings').forEach(c => c.classList.add('hidden'));
   document.querySelectorAll('.container.wide > .tabs > .tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`.container.wide > .tabs > .tab[data-tab="${name}"]`).classList.add('active');
@@ -331,6 +335,21 @@ document.querySelectorAll('.tab-content .tabs .tab').forEach(tab => {
 
 const today = todayStr();
 let allLocations = [];
+
+// Helper function to generate location map URL dynamically
+function renderMapBtn(locObj) {
+  if (!locObj) return '-';
+  const url = locObj.mapsUrl || (locObj.lat && locObj.lng ? `https://www.google.com/maps?q=${locObj.lat},${locObj.lng}` : null);
+  if (url) {
+    return `<a href="${url}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
+             📍 View on Map<br><span style="font-size:0.68rem; color:var(--gray);">${locObj.lat ?? ''}, ${locObj.lng ?? ''}</span>
+           </a>`;
+  }
+  if (locObj.gpsError) {
+    return `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${locObj.gpsError}</span></span>`;
+  }
+  return '-';
+}
 
 // ===== OVERVIEW REAL-TIME =====
 function setupRealtimeOverview() {
@@ -376,25 +395,8 @@ function renderTodayTable() {
       if (log.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
       if (log.status === 'in_progress') statusBadge = '<span class="badge yellow">In Progress</span>';
 
-      const inLoc = log.clockInLocation;
-      const outLoc = log.clockOutLocation;
-
-      // Clear, clickable map buttons (much more visible than plain text links)
-      const inPhoto = inLoc && inLoc.lat
-        ? `<a href="${inLoc.mapsUrl}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
-             📍 Open Map<br><span style="font-size:0.68rem; color:var(--gray);">${inLoc.lat}, ${inLoc.lng}<br>±${inLoc.accuracy || '?'}m</span>
-           </a>`
-        : (inLoc && inLoc.gpsError
-            ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${inLoc.gpsError}</span></span>`
-            : '-');
-
-      const outPhoto = outLoc && outLoc.lat
-        ? `<a href="${outLoc.mapsUrl}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
-             📍 Open Map<br><span style="font-size:0.68rem; color:var(--gray);">${outLoc.lat}, ${outLoc.lng}<br>±${outLoc.accuracy || '?'}m</span>
-           </a>`
-        : (outLoc && outLoc.gpsError
-            ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${outLoc.gpsError}</span></span>`
-            : '-');
+      const inPhoto = renderMapBtn(log.clockInLocation);
+      const outPhoto = renderMapBtn(log.clockOutLocation);
 
       const lowStock = log.hasLowStock ? `<span class="badge red">⚠️ Low</span>` : '<span class="badge green">OK</span>';
       const discText = log.discrepancyReason ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>` : '-';
@@ -487,7 +489,7 @@ async function markAllRead() {
 }
 function markNotifsSeen() { markAllRead(); }
 
-// ===== RESTOCK LIST (based on live currentStock vs thresholds) =====
+// ===== RESTOCK LIST =====
 function buildRestockList() {
   const lowLocations = allLocations.map(loc => {
     const current = loc.currentStock || loc.products || {};
@@ -563,6 +565,7 @@ async function saveWaNumberFromSettings() {
 function populateLocationSelects() {
   ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
+    if (!sel) return;
     const currentVal = sel.value;
     const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
     sel.innerHTML = isAllOption ? '<option value="">All Locations</option>' : '';
@@ -642,48 +645,8 @@ function renderAdminStockOverview() {
   }).join('');
 }
 
-// ===== SUPPLY TAB (Feature 5: send for confirmation, not direct add) =====
+// ===== SUPPLY TAB =====
 document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
-
-function renderProductInputs() {
-  const locId = document.getElementById('stockLocationSelect').value;
-  const loc = allLocations.find(l => l.id === locId);
-  const container = document.getElementById('productInputs');
-  container.innerHTML = '';
-  if (!loc) return;
-  const current = loc.currentStock || loc.products || {};
-  const supplied = loc.products || {};
-  const allProducts = new Set([...Object.keys(supplied), ...Object.keys(current)]);
-
-  if (allProducts.size === 0) {
-    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet. Add one below.</p>';
-    return;
-  }
-  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (0 = skip):</div>';
-  allProducts.forEach(name => {
-    const currentQty = current[name] || 0;
-    container.innerHTML += `
-      <div class="flex" style="margin-bottom:10px; align-items:center;">
-        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current stock: ${currentQty}</div></div>
-        <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
-        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
-      </div>`;
-  });
-}
-
-function addProductField() {
-  const nameInput = document.getElementById('newProductName');
-  const name = nameInput.value.trim();
-  if (!name) return;
-  const container = document.getElementById('productInputs');
-  container.innerHTML += `
-    <div class="flex" style="margin-bottom:10px; align-items:center;">
-      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">New product</div></div>
-      <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
-      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
-    </div>`;
-  nameInput.value = '';
-}
 
 async function sendSupplyForConfirmation() {
   const locId = document.getElementById('stockLocationSelect').value;
@@ -698,8 +661,6 @@ async function sendSupplyForConfirmation() {
 
   if (Object.keys(items).length === 0) { alert('Please enter at least one quantity to add.'); return; }
 
-  // Register any brand-new product names in the location's products list at 0,
-  // so thresholds/UI can reference them even before confirmation.
   const supplied = { ...(loc.products || {}) };
   let needsProductUpdate = false;
   for (const name of Object.keys(items)) {
@@ -707,7 +668,6 @@ async function sendSupplyForConfirmation() {
   }
   if (needsProductUpdate) await db.collection('locations').doc(locId).update({ products: supplied });
 
-  // Create a pending supply request — NOT applied to currentStock yet (Feature 5)
   await db.collection('supplyRequests').add({
     locationId: locId,
     locationName: loc.name,
@@ -716,7 +676,6 @@ async function sendSupplyForConfirmation() {
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
 
-  // Update the "supplied" baseline total immediately so thresholds/% calculations stay meaningful
   const newSupplied = { ...supplied };
   for (const [name, qty] of Object.entries(items)) newSupplied[name] = (newSupplied[name] || 0) + qty;
   await db.collection('locations').doc(locId).update({ products: newSupplied });
@@ -726,7 +685,6 @@ async function sendSupplyForConfirmation() {
   renderProductInputs();
 }
 
-// ===== Pending/disputed supply requests management =====
 function renderPendingSupplyList() {
   db.collection('supplyRequests')
     .where('status', 'in', ['pending_confirmation', 'disputed'])
@@ -782,7 +740,7 @@ async function correctSupply(requestId, locationId) {
   alert('Corrected supply sent back to merchandiser for confirmation.');
 }
 
-// ===== THRESHOLDS (Feature 1) =====
+// ===== THRESHOLDS =====
 document.getElementById('thresholdLocationSelect').addEventListener('change', renderThresholdInputs);
 
 function renderThresholdInputs() {
@@ -818,7 +776,7 @@ async function saveThresholds() {
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
-// ===== EDIT/CORRECT STOCK (Feature 3) =====
+// ===== EDIT/CORRECT STOCK =====
 document.getElementById('editStockLocationSelect').addEventListener('change', renderEditStockInputs);
 
 function renderEditStockInputs() {
@@ -852,11 +810,10 @@ async function saveStockEdit() {
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
-// ===== REPORTS TAB =====
+// ===== REPORTS TAB (FIXED FILTERING) =====
 let adminSalesData = [];
 let adminSupplyData = [];
 
-// Set default date range to last 30 days on page load
 function setDefaultDateFilters() {
   const today = new Date();
   const prior = new Date(today); prior.setDate(prior.getDate() - 30);
@@ -872,53 +829,35 @@ async function loadReports() {
   const fromDate = document.getElementById('salesFromDate').value;
   const toDate = document.getElementById('salesToDate').value;
   const tbody = document.querySelector('#reportsTable tbody');
-  tbody.innerHTML = '<tr><td colspan="11">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading...</td></tr>';
 
   const locationsToQuery = locId ? allLocations.filter(l => l.id === locId) : allLocations;
-  let allEntries = []; // collect all entries across all locations, then sort by date
+  let allEntries = [];
   adminSalesData = [];
 
   for (const loc of locationsToQuery) {
     try {
-      // Fetch recent logs (no range filter on server to avoid missing Firestore index errors)
-      // Then filter by date client-side — more reliable
-      const snap = await db.collection('locations').doc(loc.id)
-        .collection('logs')
-        .orderBy('date', 'desc')
-        .limit(120)
-        .get();
-
+      const snap = await db.collection('locations').doc(loc.id).collection('logs').get();
       snap.forEach(doc => {
         const d = doc.data();
-        const logDate = d.date || '';
-        // Client-side date filter
+        const logDate = d.date || doc.id; // fallback to doc.id if date field isn't set
+        
+        // Exact Client-side Date Range Check
         if (fromDate && logDate < fromDate) return;
         if (toDate && logDate > toDate) return;
-        allEntries.push({ loc, d });
+        
+        allEntries.push({ loc, d, logDate });
       });
     } catch (err) {
-      console.warn('Error loading logs for', loc.name, err);
-      // Fallback: try without orderBy if index is missing
-      try {
-        const snap = await db.collection('locations').doc(loc.id).collection('logs').limit(120).get();
-        snap.forEach(doc => {
-          const d = doc.data();
-          const logDate = d.date || '';
-          if (fromDate && logDate < fromDate) return;
-          if (toDate && logDate > toDate) return;
-          allEntries.push({ loc, d });
-        });
-      } catch (e2) {
-        console.error('Fallback also failed for', loc.name, e2);
-      }
+      console.error('Error fetching logs for location:', loc.name, err);
     }
   }
 
-  // Sort all entries by date descending across all locations
-  allEntries.sort((a, b) => (b.d.date || '').localeCompare(a.d.date || ''));
+  // Sort by date descending
+  allEntries.sort((a, b) => b.logDate.localeCompare(a.logDate));
 
   const rows = [];
-  allEntries.forEach(({ loc, d }) => {
+  allEntries.forEach(({ loc, d, logDate }) => {
     const statusLabel = d.status === 'submitted' ? 'Submitted' : d.status === 'flagged' ? 'Flagged' : 'Pending';
     const statusColor = d.status === 'submitted' ? 'var(--green-main)' : d.status === 'flagged' ? 'var(--red)' : 'var(--gray)';
     const products = d.soldQty ? Object.keys(d.soldQty) : [];
@@ -927,32 +866,33 @@ async function loadReports() {
 
     if (products.length === 0) {
       rows.push(`<tr>
-        <td>${d.date}</td><td>${loc.name}</td>
+        <td>${logDate}</td><td>${loc.name}</td>
         <td>${d.clockIn||'-'}</td><td>${d.clockOut||'-'}</td>
-        <td colspan="4" style="color:var(--gray);">No report</td>
+        <td colspan="4" style="color:var(--gray);">No report submitted</td>
         <td style="color:${lowColor};">${lowText}</td>
         <td style="color:${statusColor};font-weight:700;">${statusLabel}</td>
         <td>-</td></tr>`);
-      adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:'' });
+      adminSalesData.push({ date:logDate, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:'' });
     } else {
       products.forEach((product, idx) => {
-        const disc = d.discrepancy?.[product];
-        const discText = disc ? `${disc.diff>0?'+':''}${disc.diff}` : '-';
         const opening = d.openingStock?.[product] ?? '-';
+        const sold = d.soldQty[product] ?? 0;
+        const closing = d.closingStock?.[product] ?? '-';
+        
         rows.push(`<tr>
-          ${idx===0 ? `<td rowspan="${products.length}">${d.date}</td>
+          ${idx===0 ? `<td rowspan="${products.length}">${logDate}</td>
             <td rowspan="${products.length}">${loc.name}</td>
             <td rowspan="${products.length}">${d.clockIn||'-'}</td>
             <td rowspan="${products.length}">${d.clockOut||'-'}</td>` : ''}
           <td>${product}</td>
           <td>${opening}</td>
-          <td><strong>${d.soldQty[product]}</strong></td>
-          <td>${d.closingStock?.[product]??'-'}</td>
+          <td><strong>${sold}</strong></td>
+          <td>${closing}</td>
           ${idx===0 ? `<td rowspan="${products.length}" style="color:${lowColor};">${lowText}</td>
             <td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>
             <td rowspan="${products.length}">${d.discrepancyReason||'-'}</td>` : ''}
         </tr>`);
-        adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:d.discrepancyReason||'' });
+        adminSalesData.push({ date:logDate, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold, closing, lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:d.discrepancyReason||'' });
       });
     }
   });
@@ -965,28 +905,26 @@ async function loadSupplyReports() {
   const fromDate = document.getElementById('supplyFromDate').value;
   const toDate = document.getElementById('supplyToDate').value;
   const tbody = document.querySelector('#supplyReportsTable tbody');
-  tbody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Loading...</td></tr>';
 
-  let query = db.collection('supplyRequests').orderBy('createdAt', 'desc').limit(200);
-  const snap = await query.get();
-  const rows = [];
+  const snap = await db.collection('supplyRequests').get();
   adminSupplyData = [];
 
-  // Collect + filter client-side (createdAt is a timestamp, not a string date)
   let entries = [];
   snap.forEach(doc => {
     const d = doc.data();
     if (locId && d.locationId !== locId) return;
     const dateObj = d.createdAt ? d.createdAt.toDate() : null;
     const dateStr = dateObj ? dateObj.toISOString().split('T')[0] : '';
+    
     if (fromDate && dateStr < fromDate) return;
     if (toDate && dateStr > toDate) return;
     entries.push({ d, dateStr, dateObj });
   });
 
-  // Sort by date descending
   entries.sort((a, b) => (b.dateObj||0) - (a.dateObj||0));
 
+  const rows = [];
   entries.forEach(({ d, dateStr }) => {
     const date = dateStr ? new Date(dateStr).toLocaleDateString('en-GB') : '-';
     const statusLabel = {confirmed:'Confirmed',disputed:'Disputed',cancelled:'Cancelled',pending_confirmation:'Awaiting Confirmation'}[d.status] || 'Pending';
@@ -1127,9 +1065,6 @@ async function removeGlobalProduct(i) {
   await db.collection('admin').doc('settings').set({ globalProducts }, { merge: true });
   renderGlobalProductsList();
 }
-
-// ===== UPDATED renderProductInputs using global products =====
-document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
 
 function renderProductInputs() {
   const locId = document.getElementById('stockLocationSelect').value;
