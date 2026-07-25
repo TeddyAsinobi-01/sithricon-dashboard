@@ -377,12 +377,24 @@ function renderTodayTable() {
 
       const inLoc = log.clockInLocation;
       const outLoc = log.clockOutLocation;
+
+      // Clear, clickable map buttons (much more visible than plain text links)
       const inPhoto = inLoc && inLoc.lat
-        ? `<a href="${inLoc.mapsUrl}" target="_blank" style="font-size:0.78rem; color:#1565C0;">📍 ${inLoc.lat},${inLoc.lng}<br><span style="color:var(--gray);">±${inLoc.accuracy}m</span></a>`
-        : (inLoc && inLoc.gpsError ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS</span>` : '-');
+        ? `<a href="${inLoc.mapsUrl}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
+             📍 Open Map<br><span style="font-size:0.68rem; color:var(--gray);">${inLoc.lat}, ${inLoc.lng}<br>±${inLoc.accuracy || '?'}m</span>
+           </a>`
+        : (inLoc && inLoc.gpsError
+            ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${inLoc.gpsError}</span></span>`
+            : '-');
+
       const outPhoto = outLoc && outLoc.lat
-        ? `<a href="${outLoc.mapsUrl}" target="_blank" style="font-size:0.78rem; color:#1565C0;">📍 ${outLoc.lat},${outLoc.lng}<br><span style="color:var(--gray);">±${outLoc.accuracy}m</span></a>`
-        : (outLoc && outLoc.gpsError ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS</span>` : '-');
+        ? `<a href="${outLoc.mapsUrl}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
+             📍 Open Map<br><span style="font-size:0.68rem; color:var(--gray);">${outLoc.lat}, ${outLoc.lng}<br>±${outLoc.accuracy || '?'}m</span>
+           </a>`
+        : (outLoc && outLoc.gpsError
+            ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${outLoc.gpsError}</span></span>`
+            : '-');
+
       const lowStock = log.hasLowStock ? `<span class="badge red">⚠️ Low</span>` : '<span class="badge green">OK</span>';
       const discText = log.discrepancyReason ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>` : '-';
 
@@ -866,15 +878,43 @@ async function loadReports() {
   adminSalesData = [];
 
   for (const loc of locationsToQuery) {
-    let query = db.collection('locations').doc(loc.id).collection('logs').orderBy('date', 'desc');
-    if (fromDate) query = query.where('date', '>=', fromDate);
-    if (toDate) query = query.where('date', '<=', toDate);
-    const snap = await query.limit(60).get();
-    snap.forEach(doc => allEntries.push({ loc, d: doc.data() }));
+    try {
+      // Fetch recent logs (no range filter on server to avoid missing Firestore index errors)
+      // Then filter by date client-side — more reliable
+      const snap = await db.collection('locations').doc(loc.id)
+        .collection('logs')
+        .orderBy('date', 'desc')
+        .limit(120)
+        .get();
+
+      snap.forEach(doc => {
+        const d = doc.data();
+        const logDate = d.date || '';
+        // Client-side date filter
+        if (fromDate && logDate < fromDate) return;
+        if (toDate && logDate > toDate) return;
+        allEntries.push({ loc, d });
+      });
+    } catch (err) {
+      console.warn('Error loading logs for', loc.name, err);
+      // Fallback: try without orderBy if index is missing
+      try {
+        const snap = await db.collection('locations').doc(loc.id).collection('logs').limit(120).get();
+        snap.forEach(doc => {
+          const d = doc.data();
+          const logDate = d.date || '';
+          if (fromDate && logDate < fromDate) return;
+          if (toDate && logDate > toDate) return;
+          allEntries.push({ loc, d });
+        });
+      } catch (e2) {
+        console.error('Fallback also failed for', loc.name, e2);
+      }
+    }
   }
 
   // Sort all entries by date descending across all locations
-  allEntries.sort((a, b) => b.d.date.localeCompare(a.d.date));
+  allEntries.sort((a, b) => (b.d.date || '').localeCompare(a.d.date || ''));
 
   const rows = [];
   allEntries.forEach(({ loc, d }) => {
