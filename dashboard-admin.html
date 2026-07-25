@@ -301,6 +301,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="shared/firebase-config.js"></script>
 <script>
+  
 if (sessionStorage.getItem('ithri_admin_auth') !== 'true') window.location.href = 'index.html';
 function logout() { sessionStorage.removeItem('ithri_admin_auth'); window.location.href = 'index.html'; }
 
