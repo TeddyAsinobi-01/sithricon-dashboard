@@ -112,6 +112,38 @@
       <button class="btn yellow" onclick="addLocation()">Add Location</button>
       <div id="addLocationMsg" class="alert success hidden">Location added successfully.</div>
     </div>
+
+    <!-- Off days editor -->
+    <div class="card">
+      <h2>✏️ Edit Off Days for a Location</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Select a location and update the days the merchandiser does not work.
+      </p>
+      <label>Select Location</label>
+      <select id="offDaysLocationSelect" onchange="loadOffDaysForLocation()"><option value="">-- Select Location --</option></select>
+      <div id="offDaysCheckboxes" class="hidden" style="margin-top:10px;">
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:8px;">Select all days they do <strong>not</strong> work:</p>
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:14px;">
+          <label style="display:flex; align-items:center; gap:8px; background:var(--light-gray); border-radius:8px; padding:10px; cursor:pointer;">
+            <input type="checkbox" value="0" id="od_sun"> Sunday</label>
+          <label style="display:flex; align-items:center; gap:8px; background:var(--light-gray); border-radius:8px; padding:10px; cursor:pointer;">
+            <input type="checkbox" value="1" id="od_mon"> Monday</label>
+          <label style="display:flex; align-items:center; gap:8px; background:var(--light-gray); border-radius:8px; padding:10px; cursor:pointer;">
+            <input type="checkbox" value="2" id="od_tue"> Tuesday</label>
+          <label style="display:flex; align-items:center; gap:8px; background:var(--light-gray); border-radius:8px; padding:10px; cursor:pointer;">
+            <input type="checkbox" value="3" id="od_wed"> Wednesday</label>
+          <label style="display:flex; align-items:center; gap:8px; background:var(--light-gray); border-radius:8px; padding:10px; cursor:pointer;">
+            <input type="checkbox" value="4" id="od_thu"> Thursday</label>
+          <label style="display:flex; align-items:center; gap:8px; background:var(--light-gray); border-radius:8px; padding:10px; cursor:pointer;">
+            <input type="checkbox" value="5" id="od_fri"> Friday</label>
+          <label style="display:flex; align-items:center; gap:8px; background:var(--light-gray); border-radius:8px; padding:10px; cursor:pointer;">
+            <input type="checkbox" value="6" id="od_sat"> Saturday</label>
+        </div>
+        <button class="btn yellow" onclick="saveOffDays()">Save Off Days</button>
+        <div id="offDaysSavedMsg" class="alert success hidden" style="margin-top:8px;">Off days updated successfully.</div>
+      </div>
+    </div>
+
     <div class="card">
       <h2>All Locations</h2>
       <div id="locationsList"><p>Loading...</p></div>
@@ -1383,6 +1415,38 @@ async function saveDirectStock() {
   const msg = document.getElementById('directStockMsg');
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
   renderDirectStockInputs();
+}
+
+// ===== OFF DAYS EDITING =====
+function loadOffDaysForLocation() {
+  const locId = document.getElementById('offDaysLocationSelect').value;
+  const checkboxesDiv = document.getElementById('offDaysCheckboxes');
+  if (!locId) { checkboxesDiv.classList.add('hidden'); return; }
+
+  const loc = allLocations.find(l => l.id === locId);
+  if (!loc) return;
+
+  const offDays = loc.offDays || [];
+  [0,1,2,3,4,5,6].forEach(d => {
+    const cb = document.getElementById(['od_sun','od_mon','od_tue','od_wed','od_thu','od_fri','od_sat'][d]);
+    if (cb) cb.checked = offDays.includes(d);
+  });
+  checkboxesDiv.classList.remove('hidden');
+  document.getElementById('offDaysSavedMsg').classList.add('hidden');
+}
+
+async function saveOffDays() {
+  const locId = document.getElementById('offDaysLocationSelect').value;
+  if (!locId) return;
+  const offDays = [];
+  [0,1,2,3,4,5,6].forEach(d => {
+    const cb = document.getElementById(['od_sun','od_mon','od_tue','od_wed','od_thu','od_fri','od_sat'][d]);
+    if (cb && cb.checked) offDays.push(d);
+  });
+  await db.collection('locations').doc(locId).update({ offDays });
+  const msg = document.getElementById('offDaysSavedMsg');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
 // ===== BOOT =====
