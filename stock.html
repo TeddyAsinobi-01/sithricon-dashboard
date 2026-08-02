@@ -53,9 +53,49 @@
     <div id="discrepancyCard" class="card hidden" style="border:2px solid var(--red); margin-top:16px;">
       <h2 style="color:var(--red);">⚠️ Discrepancy Detected</h2>
       <div id="discrepancyDetails"></div>
-      <label style="margin-top:10px;">Please explain the reason</label>
-      <textarea id="discrepancyReason" rows="3" placeholder="e.g. 3 bottles sold while I was at lunch, 1 bottle leaked..."></textarea>
+
+      <label style="margin-top:12px;">Reason Type</label>
+      <select id="discrepancyType" onchange="handleDiscrepancyTypeChange()" style="margin-bottom:10px;">
+        <option value="">-- Select reason --</option>
+        <option value="spoilage">🔴 Spoilage (juice went bad)</option>
+        <option value="leakage">💧 Leakage (bottle leak / breakage)</option>
+        <option value="other">📝 Other reason</option>
+      </select>
+
+      <!-- Spoilage inputs -->
+      <div id="spoilageInputs" class="hidden">
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:8px;">Enter number of bottles spoilt per product:</p>
+        <div id="spoilageProductInputs"></div>
+      </div>
+
+      <!-- Leakage inputs -->
+      <div id="leakageInputs" class="hidden">
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:8px;">Enter number of bottles affected by leakage per product:</p>
+        <div id="leakageProductInputs"></div>
+      </div>
+
+      <!-- Other reason -->
+      <div id="otherReasonInput" class="hidden">
+        <label>Please explain</label>
+        <textarea id="discrepancyReason" rows="3" placeholder="e.g. 3 bottles sold while I was at lunch..."></textarea>
+      </div>
+
+      <label style="margin-top:6px;">Additional notes (optional)</label>
+      <textarea id="discrepancyNotes" rows="2" placeholder="Any extra details for the admin..."></textarea>
+
       <button class="btn danger" onclick="submitWithReason()">Submit Explanation</button>
+    </div>
+
+    <!-- Expiry reporting card -->
+    <div class="card" style="border:2px solid #795548; margin-top:16px;">
+      <h2 style="color:#795548;">🕒 Report Expired Products</h2>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+        If any products in your fridge have passed their expiry date, report them here.
+      </p>
+      <div id="expiryProductInputs"></div>
+      <button class="btn small outline" style="margin-bottom:10px;" onclick="addExpiryProductRow()">+ Add Product</button>
+      <button class="btn" style="background:#795548;" onclick="submitExpiryReport()">Submit Expiry Report</button>
+      <div id="expirySuccessMsg" class="alert success hidden" style="margin-top:8px;">✅ Expiry report submitted.</div>
     </div>
 
     <div id="lowStockCard" class="card hidden" style="border:2px solid var(--yellow); margin-top:16px;">
@@ -231,7 +271,7 @@ function calculateAndSubmit() {
   if (hasDiscrepancy) {
     showDiscrepancy(discrepancies);
   } else {
-    saveLog('submitted', null);
+    saveLog('submitted', null, null, null);
   }
 }
 
@@ -260,29 +300,74 @@ function showDiscrepancy(discrepancies) {
         That's <strong>${Math.abs(d.diff)} unit(s) ${direction}</strong>.
       </div>`;
   }
+  // Populate spoilage and leakage product inputs
+  const products = Object.keys(discrepancies);
+  const spoilageEl = document.getElementById('spoilageProductInputs');
+  const leakageEl = document.getElementById('leakageProductInputs');
+  spoilageEl.innerHTML = '';
+  leakageEl.innerHTML = '';
+  products.forEach(p => {
+    const key = p.replace(/[^a-zA-Z0-9]/g, '_');
+    spoilageEl.innerHTML += `<label>${p} — bottles spoilt</label><input type="number" min="0" value="0" id="spoilage_${key}" placeholder="0">`;
+    leakageEl.innerHTML += `<label>${p} — bottles leaked/broken</label><input type="number" min="0" value="0" id="leakage_${key}" placeholder="0">`;
+  });
   document.getElementById('discrepancyCard').classList.remove('hidden');
   document.getElementById('discrepancyCard').scrollIntoView({ behavior: 'smooth' });
 }
 
-async function submitWithReason() {
-  const reason = document.getElementById('discrepancyReason').value.trim();
-  if (!reason) { alert('Please provide a reason for the discrepancy.'); return; }
-  await saveLog('flagged', reason);
-  await sendDiscrepancyNotification(reason);
+function handleDiscrepancyTypeChange() {
+  const type = document.getElementById('discrepancyType').value;
+  document.getElementById('spoilageInputs').classList.toggle('hidden', type !== 'spoilage');
+  document.getElementById('leakageInputs').classList.toggle('hidden', type !== 'leakage');
+  document.getElementById('otherReasonInput').classList.toggle('hidden', type !== 'other');
 }
 
-async function sendDiscrepancyNotification(reason) {
-  await db.collection('notifications').add({
+async function submitWithReason() {
+  const type = document.getElementById('discrepancyType').value;
+  if (!type) { alert('Please select a reason type.'); return; }
+  let reason = '';
+  let spoilageData = null;
+  let leakageData = null;
+  if (type === 'spoilage') {
+    spoilageData = {};
+    Object.keys(calculatedData.discrepancies).forEach(p => {
+      const key = p.replace(/[^a-zA-Z0-9]/g, '_');
+      const val = parseFloat(document.getElementById('spoilage_' + key)?.value) || 0;
+      if (val > 0) spoilageData[p] = val;
+    });
+    reason = 'Spoilage: ' + Object.entries(spoilageData).map(([p,q]) => q + ' ' + p).join(', ');
+  } else if (type === 'leakage') {
+    leakageData = {};
+    Object.keys(calculatedData.discrepancies).forEach(p => {
+      const key = p.replace(/[^a-zA-Z0-9]/g, '_');
+      const val = parseFloat(document.getElementById('leakage_' + key)?.value) || 0;
+      if (val > 0) leakageData[p] = val;
+    });
+    reason = 'Leakage: ' + Object.entries(leakageData).map(([p,q]) => q + ' ' + p).join(', ');
+  } else {
+    reason = document.getElementById('discrepancyReason').value.trim();
+    if (!reason) { alert('Please provide a reason.'); return; }
+  }
+  const notes = document.getElementById('discrepancyNotes').value.trim();
+  const fullReason = notes ? reason + ' | Notes: ' + notes : reason;
+  await saveLog('flagged', fullReason, spoilageData, leakageData);
+  await sendDiscrepancyNotification(fullReason, spoilageData, leakageData);
+}
+
+async function sendDiscrepancyNotification(reason, spoilage, leakage) {
+  const payload = {
     type: 'discrepancy', locationId: session.locationId, locationName: session.locationName,
     date: today, reason, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
+  };
+  if (spoilage) payload.spoilage = spoilage;
+  if (leakage) payload.leakage = leakage;
+  await db.collection('notifications').add(payload);
 }
 
-async function saveLog(status, discrepancyReason) {
+async function saveLog(status, discrepancyReason, spoilageData, leakageData) {
   const { closingStock, soldQty, discrepancies, lowStockItems } = calculatedData;
   const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
   const locRef = db.collection('locations').doc(session.locationId);
-
   const payload = {
     date: today, locationId: session.locationId, locationName: session.locationName,
     openingStock, closingStock, soldQty, discrepancy: discrepancies,
@@ -290,17 +375,16 @@ async function saveLog(status, discrepancyReason) {
     hasLowStock: Object.keys(lowStockItems).length > 0, status,
     submittedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
-
+  if (spoilageData) payload.spoilage = spoilageData;
+  if (leakageData) payload.leakage = leakageData;
   try {
     await logRef.set(payload, { merge: true });
     await locRef.update({ currentStock: closingStock });
-
     if (Object.keys(lowStockItems).length > 0) await sendLowStockNotification(lowStockItems);
-
     document.getElementById('discrepancyCard').classList.add('hidden');
     document.getElementById('successMsg').classList.remove('hidden');
     document.getElementById('successMsg').scrollIntoView({ behavior: 'smooth' });
-    document.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
+    document.querySelectorAll('input, textarea, button, select').forEach(el => el.disabled = true);
   } catch (e) {
     alert('Failed to submit. Check your connection and try again.');
     console.error(e);
@@ -325,6 +409,56 @@ async function shareLowStockWhatsApp() {
   text += '\n_Please arrange restock at your earliest convenience._';
   const url = number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
   window.open(url, '_blank');
+}
+
+// ===== EXPIRY REPORTING =====
+function addExpiryProductRow() {
+  const container = document.getElementById('expiryProductInputs');
+  const products = Object.keys(openingStock);
+  if (products.length > 0) {
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:8px; align-items:center;">
+        <select style="flex:2; margin-bottom:0; padding:10px; border:1px solid #ddd; border-radius:8px;">
+          ${products.map(p => `<option value="${p}">${p}</option>`).join('')}
+        </select>
+        <input type="number" min="0" value="0" placeholder="Qty" style="flex:1; margin-bottom:0; margin-left:8px;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  } else {
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:8px; align-items:center;">
+        <input type="text" placeholder="Product name" style="flex:2; margin-bottom:0;">
+        <input type="number" min="0" value="0" placeholder="Qty" style="flex:1; margin-bottom:0; margin-left:8px;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  }
+}
+
+async function submitExpiryReport() {
+  const rows = document.querySelectorAll('#expiryProductInputs .flex');
+  if (rows.length === 0) { alert('Please add at least one product.'); return; }
+  const expiryItems = {};
+  rows.forEach(row => {
+    const sel = row.querySelector('select');
+    const textInput = row.querySelector('input[type="text"]');
+    const numInput = row.querySelector('input[type="number"]');
+    const productName = sel ? sel.value : (textInput ? textInput.value.trim() : '');
+    const qty = parseFloat(numInput?.value) || 0;
+    if (productName && qty > 0) expiryItems[productName] = qty;
+  });
+  if (Object.keys(expiryItems).length === 0) { alert('Please enter at least one quantity greater than 0.'); return; }
+  try {
+    await db.collection('notifications').add({
+      type: 'expiry', locationId: session.locationId, locationName: session.locationName,
+      date: today, expiryItems, read: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    document.getElementById('expirySuccessMsg').classList.remove('hidden');
+    document.getElementById('expiryProductInputs').innerHTML = '';
+  } catch(e) {
+    alert('Failed to submit expiry report. Check your connection.');
+    console.error(e);
+  }
 }
 
 init();

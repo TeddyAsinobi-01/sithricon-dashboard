@@ -54,6 +54,7 @@
       <button class="btn small outline" onclick="markAllRead()">Mark all as read</button>
     </div>
 
+    <!-- Restock Summary Card -->
     <div id="restockSummaryCard" class="card hidden" style="border:2px solid var(--yellow);">
       <div class="flex-between" style="margin-bottom:10px;">
         <h2 style="margin:0; color:#856404;">📋 Restock List</h2>
@@ -75,7 +76,29 @@
       </div>
     </div>
 
-    <div id="notifList"><div class="empty-state">No notifications yet.</div></div>
+    <!-- Notification sub-tabs -->
+    <div class="tabs" style="margin-bottom:10px;">
+      <div class="tab active" data-notif-tab="discrepancy">⚠️ Discrepancy <span id="discrepancyBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+      <div class="tab" data-notif-tab="supply">📦 Supply <span id="supplyBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+      <div class="tab" data-notif-tab="expiry">🕒 Expiry <span id="expiryBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+    </div>
+
+    <div id="notif-discrepancy" class="notif-tab-content">
+      <div class="empty-state" id="discrepancyEmpty">No discrepancy notifications.</div>
+      <div id="discrepancyList"></div>
+    </div>
+    <div id="notif-supply" class="notif-tab-content hidden">
+      <div class="empty-state" id="supplyEmpty">No supply notifications.</div>
+      <div id="supplyList"></div>
+    </div>
+    <div id="notif-expiry" class="notif-tab-content hidden">
+      <div class="card" style="margin-bottom:12px;">
+        <h3>Report Expired Products</h3>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">Merchandisers can report expired products from their stock page. They will appear here.</p>
+      </div>
+      <div class="empty-state" id="expiryEmpty">No expiry reports yet.</div>
+      <div id="expiryList"></div>
+    </div>
   </div>
 
   <!-- LOCATIONS TAB -->
@@ -172,6 +195,7 @@
     <div class="tabs" style="margin-bottom:10px;">
       <div class="tab active" data-subtab="sales">Sales History</div>
       <div class="tab" data-subtab="supply">Supply History</div>
+      <div class="tab" data-subtab="spoilage">Spoilage & Loss</div>
     </div>
 
     <div id="subtab-sales" class="subtab-content">
@@ -209,14 +233,8 @@
       <div class="card">
         <h2>Filter</h2>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-          <div>
-            <label>From Date</label>
-            <input type="date" id="supplyFromDate" style="margin-bottom:0;">
-          </div>
-          <div>
-            <label>To Date</label>
-            <input type="date" id="supplyToDate" style="margin-bottom:0;">
-          </div>
+          <div><label>From Date</label><input type="date" id="supplyFromDate" style="margin-bottom:0;"></div>
+          <div><label>To Date</label><input type="date" id="supplyToDate" style="margin-bottom:0;"></div>
         </div>
         <label>Location</label>
         <select id="supplyReportLocationSelect" style="margin-bottom:10px;"><option value="">All Locations</option></select>
@@ -231,6 +249,31 @@
           <table id="supplyReportsTable" style="min-width:700px; font-size:0.82rem;">
             <thead><tr><th>Date</th><th>Location</th><th>Product</th><th>Amount Supplied</th><th>Amount Received</th><th>Discrepancy</th><th>Status</th></tr></thead>
             <tbody><tr><td colspan="7" style="text-align:center; color:var(--gray);">Set filters and click "Load Supply History".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="subtab-spoilage" class="subtab-content hidden">
+      <div class="card">
+        <h2>Filter</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div><label>From Date</label><input type="date" id="spoilageFromDate" style="margin-bottom:0;"></div>
+          <div><label>To Date</label><input type="date" id="spoilageToDate" style="margin-bottom:0;"></div>
+        </div>
+        <label>Location</label>
+        <select id="spoilageLocationSelect" style="margin-bottom:10px;"><option value="">All Locations</option></select>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadSpoilageReports()">Load Records</button>
+          <button class="btn small yellow" onclick="exportSpoilageCSV()">⬇️ Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Spoilage & Loss Records</h2>
+        <div style="overflow-x:auto;">
+          <table id="spoilageTable" style="min-width:700px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Product</th><th>Type</th><th>Bottles Affected</th><th>Notes</th></tr></thead>
+            <tbody><tr><td colspan="6" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -301,17 +344,12 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="shared/firebase-config.js"></script>
 <script>
-  
 if (sessionStorage.getItem('ithri_admin_auth') !== 'true') window.location.href = 'index.html';
 function logout() { sessionStorage.removeItem('ithri_admin_auth'); window.location.href = 'index.html'; }
 
-function todayStr() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
 // ===== TABS =====
 function switchTab(name) {
+  document.querySelectorAll('.tabs:not(.tabs ~ .tabs) > .tab').forEach(t => {});
   document.querySelectorAll('#tab-overview, #tab-notifications, #tab-locations, #tab-stock, #tab-reports, #tab-settings').forEach(c => c.classList.add('hidden'));
   document.querySelectorAll('.container.wide > .tabs > .tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`.container.wide > .tabs > .tab[data-tab="${name}"]`).classList.add('active');
@@ -335,21 +373,6 @@ document.querySelectorAll('.tab-content .tabs .tab').forEach(tab => {
 
 const today = todayStr();
 let allLocations = [];
-
-// Helper function to generate location map URL dynamically
-function renderMapBtn(locObj) {
-  if (!locObj) return '-';
-  const url = locObj.mapsUrl || (locObj.lat && locObj.lng ? `https://www.google.com/maps?q=${locObj.lat},${locObj.lng}` : null);
-  if (url) {
-    return `<a href="${url}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
-             📍 View on Map<br><span style="font-size:0.68rem; color:var(--gray);">${locObj.lat ?? ''}, ${locObj.lng ?? ''}</span>
-           </a>`;
-  }
-  if (locObj.gpsError) {
-    return `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${locObj.gpsError}</span></span>`;
-  }
-  return '-';
-}
 
 // ===== OVERVIEW REAL-TIME =====
 function setupRealtimeOverview() {
@@ -395,8 +418,25 @@ function renderTodayTable() {
       if (log.status === 'flagged') statusBadge = '<span class="badge red">Flagged</span>';
       if (log.status === 'in_progress') statusBadge = '<span class="badge yellow">In Progress</span>';
 
-      const inPhoto = renderMapBtn(log.clockInLocation);
-      const outPhoto = renderMapBtn(log.clockOutLocation);
+      const inLoc = log.clockInLocation;
+      const outLoc = log.clockOutLocation;
+
+      // Clear, clickable map buttons (much more visible than plain text links)
+      const inPhoto = inLoc && inLoc.lat
+        ? `<a href="${inLoc.mapsUrl}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
+             📍 Open Map<br><span style="font-size:0.68rem; color:var(--gray);">${inLoc.lat}, ${inLoc.lng}<br>±${inLoc.accuracy || '?'}m</span>
+           </a>`
+        : (inLoc && inLoc.gpsError
+            ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${inLoc.gpsError}</span></span>`
+            : '-');
+
+      const outPhoto = outLoc && outLoc.lat
+        ? `<a href="${outLoc.mapsUrl}" target="_blank" class="btn small outline" style="font-size:0.75rem; padding:4px 8px; display:inline-block; text-decoration:none;">
+             📍 Open Map<br><span style="font-size:0.68rem; color:var(--gray);">${outLoc.lat}, ${outLoc.lng}<br>±${outLoc.accuracy || '?'}m</span>
+           </a>`
+        : (outLoc && outLoc.gpsError
+            ? `<span style="font-size:0.75rem; color:var(--gray);">⚠️ No GPS<br><span style="font-size:0.68rem;">${outLoc.gpsError}</span></span>`
+            : '-');
 
       const lowStock = log.hasLowStock ? `<span class="badge red">⚠️ Low</span>` : '<span class="badge green">OK</span>';
       const discText = log.discrepancyReason ? `<span title="${log.discrepancyReason}" style="cursor:help;">⚠️ ${log.discrepancyReason.substring(0,30)}${log.discrepancyReason.length > 30 ? '…' : ''}</span>` : '-';
@@ -436,41 +476,90 @@ function openPhoto(url) {
 }
 
 // ===== NOTIFICATIONS REAL-TIME =====
+// ===== NOTIFICATION SUB-TAB SWITCHING =====
+document.querySelectorAll('[data-notif-tab]').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('[data-notif-tab]').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.notif-tab-content').forEach(c => c.classList.add('hidden'));
+    tab.classList.add('active');
+    document.getElementById(`notif-${tab.dataset.notifTab}`).classList.remove('hidden');
+  });
+});
+
 function setupRealtimeNotifications() {
-  db.collection('notifications').orderBy('createdAt', 'desc').limit(50).onSnapshot(snap => {
-    const notifList = document.getElementById('notifList');
+  db.collection('notifications').orderBy('createdAt', 'desc').limit(100).onSnapshot(snap => {
+    const discrepancyItems = [], supplyItems = [], expiryItems = [];
     let unread = 0;
-    const items = [];
 
     snap.forEach(doc => {
       const n = doc.data();
       if (!n.read) unread++;
       const time = n.createdAt ? new Date(n.createdAt.toDate()).toLocaleString('en-GB') : (n.date || '');
-      let body = '', cls = '';
+      const markBtn = !n.read ? `<button class="btn small outline" style="margin-top:8px;" onclick="markRead('${doc.id}')">Mark as read</button>` : '';
+      const readCls = n.read ? 'read' : '';
 
-      if (n.type === 'low_stock') {
-        const itemLines = Object.entries(n.lowStockItems || {}).map(([p, d]) =>
-          `<li><strong>${p}</strong>: ${d.closing} units left (threshold ${d.threshold})</li>`).join('');
-        body = `<div style="font-weight:700; margin-bottom:6px;">📉 Low Stock — ${n.locationName}</div><ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>`;
-      } else if (n.type === 'discrepancy') {
-        cls = 'flagged';
-        body = `<div style="font-weight:700; margin-bottom:6px;">⚠️ Discrepancy — ${n.locationName}</div><div style="font-size:0.9rem;">Reason: ${n.reason}</div>`;
-      } else if (n.type === 'supply_disputed') {
-        cls = 'flagged';
-        const itemLines = Object.entries(n.items || {}).map(([p, q]) => `<li>${p}: ${q} units</li>`).join('');
-        body = `<div style="font-weight:700; margin-bottom:6px;">❌ Supply Disputed — ${n.locationName}</div>
-          <p style="font-size:0.85rem; margin-bottom:4px;">Merchandiser says this supply was not correct:</p>
-          <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
-          <p style="font-size:0.8rem; color:var(--gray); margin-top:4px;">Go to Supply Stock tab → Pending/Disputed Supply Requests to correct or cancel.</p>`;
+      if (n.type === 'discrepancy') {
+        discrepancyItems.push(`
+          <div class="notif-item flagged ${readCls}" id="notif-${doc.id}">
+            <div style="font-weight:700; margin-bottom:6px;">⚠️ Discrepancy — ${n.locationName}</div>
+            <div style="font-size:0.9rem;">Reason: ${n.reason}</div>
+            ${n.spoilage ? `<div style="font-size:0.85rem; color:var(--red); margin-top:4px;">🔴 Spoilage: ${JSON.stringify(n.spoilage)}</div>` : ''}
+            ${n.leakage ? `<div style="font-size:0.85rem; color:var(--red); margin-top:2px;">💧 Leakage: ${JSON.stringify(n.leakage)}</div>` : ''}
+            <div class="notif-time">${time}</div>${markBtn}
+          </div>`);
+      } else if (n.type === 'low_stock' || n.type === 'supply_disputed') {
+        const itemLines = n.type === 'low_stock'
+          ? Object.entries(n.lowStockItems || {}).map(([p, d]) => `<li><strong>${p}</strong>: ${d.closing} units left (threshold ${d.threshold})</li>`).join('')
+          : Object.entries(n.items || {}).map(([p, q]) => {
+              const rec = n.merchandiserReceivedItems?.[p];
+              return `<li>${p}: Admin recorded ${q}${rec != null ? `, received ${rec}` : ''}</li>`;
+            }).join('');
+        const title = n.type === 'low_stock' ? `📉 Low Stock — ${n.locationName}` : `❌ Supply Disputed — ${n.locationName}`;
+        supplyItems.push(`
+          <div class="notif-item ${n.read ? 'read' : ''}" id="notif-${doc.id}">
+            <div style="font-weight:700; margin-bottom:6px;">${title}</div>
+            <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
+            ${n.disputeNote ? `<div style="font-size:0.85rem; color:#555; margin-top:4px;"><strong>Note:</strong> ${n.disputeNote}</div>` : ''}
+            <div class="notif-time">${time}</div>${markBtn}
+          </div>`);
+      } else if (n.type === 'expiry') {
+        const itemLines = Object.entries(n.expiryItems || {}).map(([p, qty]) => `<li><strong>${p}</strong>: ${qty} units expired</li>`).join('');
+        expiryItems.push(`
+          <div class="notif-item ${readCls}" style="border-left-color:#795548; background:#fdf6ee;" id="notif-${doc.id}">
+            <div style="font-weight:700; margin-bottom:6px;">🕒 Expiry Report — ${n.locationName}</div>
+            <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
+            <div class="notif-time">${time}</div>${markBtn}
+          </div>`);
       }
-
-      items.push(`<div class="notif-item ${n.read ? 'read' : ''} ${cls}" id="notif-${doc.id}">
-        ${body}<div class="notif-time">${time}</div>
-        ${!n.read ? `<button class="btn small outline" style="margin-top:8px;" onclick="markRead('${doc.id}')">Mark as read</button>` : ''}
-      </div>`);
     });
 
-    notifList.innerHTML = items.length ? items.join('') : '<div class="empty-state">No notifications yet.</div>';
+    // Render each tab
+    const discEl = document.getElementById('discrepancyList');
+    const discEmpty = document.getElementById('discrepancyEmpty');
+    discEl.innerHTML = discrepancyItems.join('');
+    discEmpty.classList.toggle('hidden', discrepancyItems.length > 0);
+
+    const supEl = document.getElementById('supplyList');
+    const supEmpty = document.getElementById('supplyEmpty');
+    supEl.innerHTML = supplyItems.join('');
+    supEmpty.classList.toggle('hidden', supplyItems.length > 0);
+
+    const expEl = document.getElementById('expiryList');
+    const expEmpty = document.getElementById('expiryEmpty');
+    expEl.innerHTML = expiryItems.join('');
+    expEmpty.classList.toggle('hidden', expiryItems.length > 0);
+
+    // Update badges
+    const setBadge = (id, count) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = count;
+      el.classList.toggle('hidden', count === 0);
+    };
+    setBadge('discrepancyBadge', discrepancyItems.filter(i => !i.includes('read')).length);
+    setBadge('supplyBadge', supplyItems.filter(i => !i.includes('read')).length);
+    setBadge('expiryBadge', expiryItems.filter(i => !i.includes('read')).length);
+
     buildRestockList();
 
     const countEl = document.getElementById('notifCount');
@@ -478,6 +567,62 @@ function setupRealtimeNotifications() {
     if (unread > 0) { countEl.textContent = unread; countEl.classList.remove('hidden'); dotEl.classList.remove('hidden'); }
     else { countEl.classList.add('hidden'); dotEl.classList.add('hidden'); }
   });
+}
+
+// ===== SPOILAGE REPORTS =====
+let spoilageData = [];
+
+async function loadSpoilageReports() {
+  const locId = document.getElementById('spoilageLocationSelect').value;
+  const fromDate = document.getElementById('spoilageFromDate').value;
+  const toDate = document.getElementById('spoilageToDate').value;
+  const tbody = document.querySelector('#spoilageTable tbody');
+  tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+  spoilageData = [];
+
+  const locationsToQuery = locId ? allLocations.filter(l => l.id === locId) : allLocations;
+  const rows = [];
+
+  for (const loc of locationsToQuery) {
+    let query = db.collection('locations').doc(loc.id).collection('logs').orderBy('date', 'desc');
+    if (fromDate) query = query.where('date', '>=', fromDate);
+    if (toDate) query = query.where('date', '<=', toDate);
+    const snap = await query.limit(60).get();
+
+    snap.forEach(doc => {
+      const d = doc.data();
+      if (!d.spoilage && !d.leakage) return;
+
+      const addRows = (items, type) => {
+        Object.entries(items || {}).forEach(([product, qty]) => {
+          if (!qty) return;
+          rows.push(`<tr>
+            <td>${d.date}</td><td>${loc.name}</td>
+            <td>${product}</td>
+            <td><span class="badge ${type === 'Spoilage' ? 'red' : 'yellow'}">${type}</span></td>
+            <td><strong>${qty}</strong></td>
+            <td>${d.discrepancyReason || '-'}</td>
+          </tr>`);
+          spoilageData.push({ date: d.date, location: loc.name, product, type, bottlesAffected: qty, notes: d.discrepancyReason || '' });
+        });
+      };
+
+      addRows(d.spoilage, 'Spoilage');
+      addRows(d.leakage, 'Leakage');
+    });
+  }
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="6" style="text-align:center; color:var(--gray);">No spoilage or loss records found.</td></tr>';
+}
+
+function exportSpoilageCSV() {
+  if (!spoilageData.length) { alert('Load records first.'); return; }
+  const headers = ['date','location','product','type','bottlesAffected','notes'];
+  const csv = [headers.join(','), ...spoilageData.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `Ithri_Spoilage_${todayStr()}.csv`;
+  a.click();
 }
 
 async function markRead(id) { await db.collection('notifications').doc(id).update({ read: true }); }
@@ -489,7 +634,7 @@ async function markAllRead() {
 }
 function markNotifsSeen() { markAllRead(); }
 
-// ===== RESTOCK LIST =====
+// ===== RESTOCK LIST (based on live currentStock vs thresholds) =====
 function buildRestockList() {
   const lowLocations = allLocations.map(loc => {
     const current = loc.currentStock || loc.products || {};
@@ -563,9 +708,8 @@ async function saveWaNumberFromSettings() {
 
 // ===== LOCATIONS TAB =====
 function populateLocationSelects() {
-  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect'].forEach(selId => {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect', 'offDaysLocationSelect', 'spoilageLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
-    if (!sel) return;
     const currentVal = sel.value;
     const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
     sel.innerHTML = isAllOption ? '<option value="">All Locations</option>' : '';
@@ -627,16 +771,15 @@ function renderAdminStockOverview() {
   if (!allLocations.length) { el.innerHTML = '<div class="empty-state">No locations yet.</div>'; return; }
   el.innerHTML = allLocations.map(loc => {
     const current = loc.currentStock || loc.products || {};
-    const supplied = loc.products || {};
     const hasStock = Object.keys(current).length > 0;
     const rows = hasStock ? Object.entries(current).map(([product, qty]) => {
-      const sup = supplied[product] || qty;
       const threshold = getThreshold(loc, product);
       const isLow = qty <= threshold;
       return `<div class="flex-between" style="padding:5px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
         <span>${product}</span>
         <span style="font-weight:700; color:${isLow ? 'var(--red)' : 'var(--green-dark)'};">
-          ${qty} <span style="font-weight:400; color:var(--gray);">/ ${sup} (threshold ${threshold})</span>${isLow ? ' ⚠️' : ''}
+          ${qty} units ${isLow ? '⚠️' : ''}
+          <span style="font-weight:400; color:var(--gray); font-size:0.78rem;"> (threshold: ${threshold})</span>
         </span></div>`;
     }).join('') : '<div style="color:var(--gray); font-size:0.85rem;">No stock assigned yet.</div>';
 
@@ -645,8 +788,48 @@ function renderAdminStockOverview() {
   }).join('');
 }
 
-// ===== SUPPLY TAB =====
+// ===== SUPPLY TAB (Feature 5: send for confirmation, not direct add) =====
 document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
+
+function renderProductInputs() {
+  const locId = document.getElementById('stockLocationSelect').value;
+  const loc = allLocations.find(l => l.id === locId);
+  const container = document.getElementById('productInputs');
+  container.innerHTML = '';
+  if (!loc) return;
+  const current = loc.currentStock || loc.products || {};
+  const supplied = loc.products || {};
+  const allProducts = new Set([...Object.keys(supplied), ...Object.keys(current)]);
+
+  if (allProducts.size === 0) {
+    container.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No products yet. Add one below.</p>';
+    return;
+  }
+  container.innerHTML = '<div style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">Enter quantity to ADD (0 = skip):</div>';
+  allProducts.forEach(name => {
+    const currentQty = current[name] || 0;
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:10px; align-items:center;">
+        <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">Current stock: ${currentQty}</div></div>
+        <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  });
+}
+
+function addProductField() {
+  const nameInput = document.getElementById('newProductName');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  const container = document.getElementById('productInputs');
+  container.innerHTML += `
+    <div class="flex" style="margin-bottom:10px; align-items:center;">
+      <div style="flex:2;"><div style="font-weight:600;">${name}</div><div style="font-size:0.75rem; color:var(--gray);">New product</div></div>
+      <input type="number" min="0" value="0" data-product="${name}" placeholder="Add qty" style="flex:1; margin-bottom:0;">
+      <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+    </div>`;
+  nameInput.value = '';
+}
 
 async function sendSupplyForConfirmation() {
   const locId = document.getElementById('stockLocationSelect').value;
@@ -661,6 +844,8 @@ async function sendSupplyForConfirmation() {
 
   if (Object.keys(items).length === 0) { alert('Please enter at least one quantity to add.'); return; }
 
+  // Register any brand-new product names in the location's products list at 0,
+  // so thresholds/UI can reference them even before confirmation.
   const supplied = { ...(loc.products || {}) };
   let needsProductUpdate = false;
   for (const name of Object.keys(items)) {
@@ -668,6 +853,7 @@ async function sendSupplyForConfirmation() {
   }
   if (needsProductUpdate) await db.collection('locations').doc(locId).update({ products: supplied });
 
+  // Create a pending supply request — NOT applied to currentStock yet (Feature 5)
   await db.collection('supplyRequests').add({
     locationId: locId,
     locationName: loc.name,
@@ -676,6 +862,7 @@ async function sendSupplyForConfirmation() {
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
 
+  // Update the "supplied" baseline total immediately so thresholds/% calculations stay meaningful
   const newSupplied = { ...supplied };
   for (const [name, qty] of Object.entries(items)) newSupplied[name] = (newSupplied[name] || 0) + qty;
   await db.collection('locations').doc(locId).update({ products: newSupplied });
@@ -685,6 +872,7 @@ async function sendSupplyForConfirmation() {
   renderProductInputs();
 }
 
+// ===== Pending/disputed supply requests management =====
 function renderPendingSupplyList() {
   db.collection('supplyRequests')
     .where('status', 'in', ['pending_confirmation', 'disputed'])
@@ -740,7 +928,7 @@ async function correctSupply(requestId, locationId) {
   alert('Corrected supply sent back to merchandiser for confirmation.');
 }
 
-// ===== THRESHOLDS =====
+// ===== THRESHOLDS (Feature 1) =====
 document.getElementById('thresholdLocationSelect').addEventListener('change', renderThresholdInputs);
 
 function renderThresholdInputs() {
@@ -776,7 +964,7 @@ async function saveThresholds() {
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
-// ===== EDIT/CORRECT STOCK =====
+// ===== EDIT/CORRECT STOCK (Feature 3) =====
 document.getElementById('editStockLocationSelect').addEventListener('change', renderEditStockInputs);
 
 function renderEditStockInputs() {
@@ -810,15 +998,16 @@ async function saveStockEdit() {
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
 
-// ===== REPORTS TAB (FIXED FILTERING) =====
+// ===== REPORTS TAB =====
 let adminSalesData = [];
 let adminSupplyData = [];
 
+// Set default date range to last 30 days on page load
 function setDefaultDateFilters() {
   const today = new Date();
   const prior = new Date(today); prior.setDate(prior.getDate() - 30);
   const fmt = d => d.toISOString().split('T')[0];
-  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate'].forEach(id => {
+  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el.value) el.value = id.includes('From') ? fmt(prior) : fmt(today);
   });
@@ -829,35 +1018,53 @@ async function loadReports() {
   const fromDate = document.getElementById('salesFromDate').value;
   const toDate = document.getElementById('salesToDate').value;
   const tbody = document.querySelector('#reportsTable tbody');
-  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11">Loading...</td></tr>';
 
   const locationsToQuery = locId ? allLocations.filter(l => l.id === locId) : allLocations;
-  let allEntries = [];
+  let allEntries = []; // collect all entries across all locations, then sort by date
   adminSalesData = [];
 
   for (const loc of locationsToQuery) {
     try {
-      const snap = await db.collection('locations').doc(loc.id).collection('logs').get();
+      // Fetch recent logs (no range filter on server to avoid missing Firestore index errors)
+      // Then filter by date client-side — more reliable
+      const snap = await db.collection('locations').doc(loc.id)
+        .collection('logs')
+        .orderBy('date', 'desc')
+        .limit(120)
+        .get();
+
       snap.forEach(doc => {
         const d = doc.data();
-        const logDate = d.date || doc.id; // fallback to doc.id if date field isn't set
-        
-        // Exact Client-side Date Range Check
+        const logDate = d.date || '';
+        // Client-side date filter
         if (fromDate && logDate < fromDate) return;
         if (toDate && logDate > toDate) return;
-        
-        allEntries.push({ loc, d, logDate });
+        allEntries.push({ loc, d });
       });
     } catch (err) {
-      console.error('Error fetching logs for location:', loc.name, err);
+      console.warn('Error loading logs for', loc.name, err);
+      // Fallback: try without orderBy if index is missing
+      try {
+        const snap = await db.collection('locations').doc(loc.id).collection('logs').limit(120).get();
+        snap.forEach(doc => {
+          const d = doc.data();
+          const logDate = d.date || '';
+          if (fromDate && logDate < fromDate) return;
+          if (toDate && logDate > toDate) return;
+          allEntries.push({ loc, d });
+        });
+      } catch (e2) {
+        console.error('Fallback also failed for', loc.name, e2);
+      }
     }
   }
 
-  // Sort by date descending
-  allEntries.sort((a, b) => b.logDate.localeCompare(a.logDate));
+  // Sort all entries by date descending across all locations
+  allEntries.sort((a, b) => (b.d.date || '').localeCompare(a.d.date || ''));
 
   const rows = [];
-  allEntries.forEach(({ loc, d, logDate }) => {
+  allEntries.forEach(({ loc, d }) => {
     const statusLabel = d.status === 'submitted' ? 'Submitted' : d.status === 'flagged' ? 'Flagged' : 'Pending';
     const statusColor = d.status === 'submitted' ? 'var(--green-main)' : d.status === 'flagged' ? 'var(--red)' : 'var(--gray)';
     const products = d.soldQty ? Object.keys(d.soldQty) : [];
@@ -866,33 +1073,32 @@ async function loadReports() {
 
     if (products.length === 0) {
       rows.push(`<tr>
-        <td>${logDate}</td><td>${loc.name}</td>
+        <td>${d.date}</td><td>${loc.name}</td>
         <td>${d.clockIn||'-'}</td><td>${d.clockOut||'-'}</td>
-        <td colspan="4" style="color:var(--gray);">No report submitted</td>
+        <td colspan="4" style="color:var(--gray);">No report</td>
         <td style="color:${lowColor};">${lowText}</td>
         <td style="color:${statusColor};font-weight:700;">${statusLabel}</td>
         <td>-</td></tr>`);
-      adminSalesData.push({ date:logDate, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:'' });
+      adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:'' });
     } else {
       products.forEach((product, idx) => {
+        const disc = d.discrepancy?.[product];
+        const discText = disc ? `${disc.diff>0?'+':''}${disc.diff}` : '-';
         const opening = d.openingStock?.[product] ?? '-';
-        const sold = d.soldQty[product] ?? 0;
-        const closing = d.closingStock?.[product] ?? '-';
-        
         rows.push(`<tr>
-          ${idx===0 ? `<td rowspan="${products.length}">${logDate}</td>
+          ${idx===0 ? `<td rowspan="${products.length}">${d.date}</td>
             <td rowspan="${products.length}">${loc.name}</td>
             <td rowspan="${products.length}">${d.clockIn||'-'}</td>
             <td rowspan="${products.length}">${d.clockOut||'-'}</td>` : ''}
           <td>${product}</td>
           <td>${opening}</td>
-          <td><strong>${sold}</strong></td>
-          <td>${closing}</td>
+          <td><strong>${d.soldQty[product]}</strong></td>
+          <td>${d.closingStock?.[product]??'-'}</td>
           ${idx===0 ? `<td rowspan="${products.length}" style="color:${lowColor};">${lowText}</td>
             <td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>
             <td rowspan="${products.length}">${d.discrepancyReason||'-'}</td>` : ''}
         </tr>`);
-        adminSalesData.push({ date:logDate, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold, closing, lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:d.discrepancyReason||'' });
+        adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:d.discrepancyReason||'' });
       });
     }
   });
@@ -905,26 +1111,28 @@ async function loadSupplyReports() {
   const fromDate = document.getElementById('supplyFromDate').value;
   const toDate = document.getElementById('supplyToDate').value;
   const tbody = document.querySelector('#supplyReportsTable tbody');
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
 
-  const snap = await db.collection('supplyRequests').get();
+  let query = db.collection('supplyRequests').orderBy('createdAt', 'desc').limit(200);
+  const snap = await query.get();
+  const rows = [];
   adminSupplyData = [];
 
+  // Collect + filter client-side (createdAt is a timestamp, not a string date)
   let entries = [];
   snap.forEach(doc => {
     const d = doc.data();
     if (locId && d.locationId !== locId) return;
     const dateObj = d.createdAt ? d.createdAt.toDate() : null;
     const dateStr = dateObj ? dateObj.toISOString().split('T')[0] : '';
-    
     if (fromDate && dateStr < fromDate) return;
     if (toDate && dateStr > toDate) return;
     entries.push({ d, dateStr, dateObj });
   });
 
+  // Sort by date descending
   entries.sort((a, b) => (b.dateObj||0) - (a.dateObj||0));
 
-  const rows = [];
   entries.forEach(({ d, dateStr }) => {
     const date = dateStr ? new Date(dateStr).toLocaleDateString('en-GB') : '-';
     const statusLabel = {confirmed:'Confirmed',disputed:'Disputed',cancelled:'Cancelled',pending_confirmation:'Awaiting Confirmation'}[d.status] || 'Pending';
@@ -1065,6 +1273,9 @@ async function removeGlobalProduct(i) {
   await db.collection('admin').doc('settings').set({ globalProducts }, { merge: true });
   renderGlobalProductsList();
 }
+
+// ===== UPDATED renderProductInputs using global products =====
+document.getElementById('stockLocationSelect').addEventListener('change', renderProductInputs);
 
 function renderProductInputs() {
   const locId = document.getElementById('stockLocationSelect').value;

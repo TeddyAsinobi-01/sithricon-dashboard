@@ -25,6 +25,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="sales">Sales History</div>
     <div class="tab" data-tab="supply">Supply History</div>
+    <div class="tab" data-tab="monthly">Monthly Report</div>
   </div>
 
   <!-- SALES TAB -->
@@ -79,9 +80,78 @@
     </div>
   </div>
 
-</div>
+  <!-- MONTHLY REPORT TAB -->
+  <div id="tab-monthly" class="tab-content hidden">
 
-<div class="bottom-nav">
+    <div class="card">
+      <h2>📊 Monthly Report</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:12px;">
+        Select the month and year to auto-generate your monthly report from saved records, then share via WhatsApp.
+      </p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+        <div>
+          <label>Month</label>
+          <select id="reportMonth" style="margin-bottom:0;">
+            <option value="1">January</option><option value="2">February</option>
+            <option value="3">March</option><option value="4">April</option>
+            <option value="5">May</option><option value="6">June</option>
+            <option value="7">July</option><option value="8">August</option>
+            <option value="9">September</option><option value="10">October</option>
+            <option value="11">November</option><option value="12">December</option>
+          </select>
+        </div>
+        <div>
+          <label>Year</label>
+          <input type="number" id="reportYear" min="2020" max="2100" style="margin-bottom:0;">
+        </div>
+      </div>
+      <button class="btn yellow" onclick="generateMonthlyReport()">Generate Report</button>
+    </div>
+
+    <!-- Generated report card -->
+    <div id="monthlyReportCard" class="card hidden">
+      <div class="flex-between" style="margin-bottom:14px;">
+        <h2 style="margin:0;" id="monthlyReportTitle">Monthly Report</h2>
+        <button class="btn small yellow" onclick="shareMonthlyWhatsApp()">📲 Share via WhatsApp</button>
+      </div>
+
+      <!-- Weekly breakdown -->
+      <div id="weeklyBreakdown"></div>
+
+      <!-- Add extra week button -->
+      <button class="btn small outline" style="margin-bottom:14px;" onclick="addExtraWeek()">+ Add Extra Week (5th Week)</button>
+
+      <!-- Monthly totals -->
+      <div id="monthlyTotals" class="card" style="background:var(--light-gray); margin-bottom:0;"></div>
+    </div>
+
+    <!-- Previous month closing stock -->
+    <div id="closingStockSection" class="card hidden">
+      <h2>Previous Month Closing Stock</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+        Enter the stock left in the fridge at the end of the previous month.
+      </p>
+      <div style="margin-bottom:8px;">
+        <label>Previous Month</label>
+        <input type="text" id="prevMonthLabel" placeholder="e.g. June 2025" style="margin-bottom:10px;">
+      </div>
+      <div id="prevClosingInputs"></div>
+      <button class="btn small outline" onclick="addPrevClosingProduct()">+ Add Product</button>
+
+      <h2 style="margin-top:16px;">Current Month Opening Stock</h2>
+      <div id="currOpeningInputs" style="margin-top:8px;"></div>
+      <button class="btn small outline" onclick="addCurrOpeningProduct()">+ Add Product</button>
+
+      <h2 style="margin-top:16px;">Current Month Closing Stock</h2>
+      <div id="currClosingInputs" style="margin-top:8px;"></div>
+      <button class="btn small outline" onclick="addCurrClosingProduct()">+ Add Product</button>
+
+      <button class="btn yellow" style="margin-top:14px;" onclick="shareMonthlyWhatsApp()">📲 Share Full Report via WhatsApp</button>
+    </div>
+
+  </div>
+
+</div>
   <a href="dashboard.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">🏠</span>Home</div></a>
   <a href="stock.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">📦</span>Stock</div></a>
   <div class="nav-item active"><span class="icon">📋</span>History</div>
@@ -231,6 +301,206 @@ function exportSupplyCSV() {
   if (!supplyData.length) { alert('No supply data to export.'); return; }
   downloadCSV(`Ithri_Supply_${session.locationName}_${todayStr()}.csv`, supplyData,
     ['date','product','supplied','received','discrepancy','status']);
+}
+
+// ===== MONTHLY REPORT (Feature 3) =====
+
+// Set default month/year to current
+(function setDefaultMonthYear() {
+  const now = new Date();
+  document.getElementById('reportMonth').value = now.getMonth() + 1;
+  document.getElementById('reportYear').value = now.getFullYear();
+})();
+
+let monthlyWeeks = [];   // array of week objects { label, sales: {product: qty} }
+let allProducts = [];    // all products found in the month's data
+let selectedMonthName = '';
+
+async function generateMonthlyReport() {
+  const month = parseInt(document.getElementById('reportMonth').value);
+  const year = parseInt(document.getElementById('reportYear').value);
+  if (!year || year < 2020) { alert('Please enter a valid year.'); return; }
+
+  // Build date range for the selected month
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0);
+  const fromStr = firstDay.toISOString().split('T')[0];
+  const toStr = lastDay.toISOString().split('T')[0];
+  selectedMonthName = firstDay.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+  document.getElementById('monthlyReportTitle').textContent = `${selectedMonthName} — ${session.locationName}`;
+
+  // Fetch all logs in this month
+  const snap = await db.collection('locations').doc(session.locationId)
+    .collection('logs')
+    .where('date', '>=', fromStr)
+    .where('date', '<=', toStr)
+    .orderBy('date', 'asc')
+    .get();
+
+  // Group by week (Week 1 = days 1-7, Week 2 = 8-14, Week 3 = 15-21, Week 4 = 22-end)
+  const weekData = [{}, {}, {}, {}]; // 4 weeks
+  const productSet = new Set();
+
+  snap.forEach(doc => {
+    const d = doc.data();
+    if (!d.soldQty) return;
+    const dayNum = parseInt(d.date.split('-')[2]);
+    const weekIdx = dayNum <= 7 ? 0 : dayNum <= 14 ? 1 : dayNum <= 21 ? 2 : 3;
+    Object.entries(d.soldQty).forEach(([product, qty]) => {
+      productSet.add(product);
+      weekData[weekIdx][product] = (weekData[weekIdx][product] || 0) + qty;
+    });
+  });
+
+  allProducts = [...productSet];
+
+  // Build 4 standard weeks
+  monthlyWeeks = [
+    { label: 'First Week (Days 1–7)', sales: weekData[0] },
+    { label: 'Second Week (Days 8–14)', sales: weekData[1] },
+    { label: 'Third Week (Days 15–21)', sales: weekData[2] },
+    { label: 'Fourth Week (Days 22–End)', sales: weekData[3] },
+  ];
+
+  renderWeeklyBreakdown();
+  renderMonthlyTotals();
+  document.getElementById('monthlyReportCard').classList.remove('hidden');
+
+  // Pre-populate stock section with product fields
+  buildStockInputFields();
+  document.getElementById('closingStockSection').classList.remove('hidden');
+}
+
+function weekTotal(sales) {
+  return Object.values(sales).reduce((a, b) => a + b, 0);
+}
+
+function renderWeeklyBreakdown() {
+  const container = document.getElementById('weeklyBreakdown');
+  container.innerHTML = monthlyWeeks.map((week, i) => `
+    <div style="margin-bottom:14px; padding:12px; background:var(--light-gray); border-radius:8px;">
+      <div style="font-weight:700; color:var(--green-dark); margin-bottom:8px;">${i + 1}) ${week.label}</div>
+      <div style="font-size:0.85rem; margin-bottom:4px; color:var(--gray);">Stock sold for the week:</div>
+      ${allProducts.map(p => `
+        <div class="flex-between" style="padding:3px 0; font-size:0.9rem;">
+          <span>${p}</span><strong>${week.sales[p] || 0}</strong>
+        </div>`).join('')}
+      <div class="flex-between" style="padding:6px 0; border-top:1px solid #ccc; margin-top:6px; font-weight:700;">
+        <span>TOTAL</span><span>${weekTotal(week.sales)}</span>
+      </div>
+    </div>`).join('');
+}
+
+function renderMonthlyTotals() {
+  const totalsEl = document.getElementById('monthlyTotals');
+  const grandTotal = monthlyWeeks.reduce((sum, w) => sum + weekTotal(w.sales), 0);
+  const productTotals = {};
+  allProducts.forEach(p => {
+    productTotals[p] = monthlyWeeks.reduce((sum, w) => sum + (w.sales[p] || 0), 0);
+  });
+
+  totalsEl.innerHTML = `
+    <div style="font-weight:700; color:var(--green-dark); margin-bottom:10px;">Monthly Totals</div>
+    ${allProducts.map(p => `
+      <div class="flex-between" style="padding:4px 0; font-size:0.9rem;">
+        <span>Total ${p}</span><strong>${productTotals[p]}</strong>
+      </div>`).join('')}
+    <div class="flex-between" style="padding:8px 0; border-top:2px solid var(--green-dark); margin-top:8px; font-weight:800; font-size:1rem;">
+      <span>GRAND TOTAL</span><span style="color:var(--green-dark);">${grandTotal}</span>
+    </div>`;
+}
+
+function addExtraWeek() {
+  const weekNum = monthlyWeeks.length + 1;
+  const ordinals = ['','First','Second','Third','Fourth','Fifth','Sixth'];
+  monthlyWeeks.push({ label: `${ordinals[weekNum]} Week (Extra)`, sales: {} });
+  renderWeeklyBreakdown();
+  renderMonthlyTotals();
+}
+
+// ===== Stock input helpers =====
+function buildStockInputFields() {
+  ['prevClosingInputs','currOpeningInputs','currClosingInputs'].forEach(id => {
+    const el = document.getElementById(id);
+    el.innerHTML = allProducts.map(p => `
+      <div class="flex-between" style="margin-bottom:8px; align-items:center;">
+        <span style="flex:2;">${p}</span>
+        <input type="number" min="0" value="0" data-product="${p}" data-section="${id}" style="flex:1; margin-bottom:0; padding:8px;">
+      </div>`).join('');
+  });
+}
+
+function addStockProductRow(containerId) {
+  const name = prompt('Enter product name:');
+  if (!name) return;
+  const container = document.getElementById(containerId);
+  container.innerHTML += `
+    <div class="flex-between" style="margin-bottom:8px; align-items:center;">
+      <span style="flex:2;">${name}</span>
+      <input type="number" min="0" value="0" data-product="${name}" data-section="${containerId}" style="flex:1; margin-bottom:0; padding:8px;">
+    </div>`;
+}
+
+function addPrevClosingProduct() { addStockProductRow('prevClosingInputs'); }
+function addCurrOpeningProduct() { addStockProductRow('currOpeningInputs'); }
+function addCurrClosingProduct() { addStockProductRow('currClosingInputs'); }
+
+function getStockInputValues(containerId) {
+  const result = {};
+  document.querySelectorAll(`#${containerId} input[data-product]`).forEach(input => {
+    result[input.dataset.product] = parseFloat(input.value) || 0;
+  });
+  return result;
+}
+
+function buildWhatsAppReport() {
+  const prevMonth = document.getElementById('prevMonthLabel').value.trim() || 'Previous Month';
+  const prevClosing = getStockInputValues('prevClosingInputs');
+  const currOpening = getStockInputValues('currOpeningInputs');
+  const currClosing = getStockInputValues('currClosingInputs');
+  const ordinals = ['First','Second','Third','Fourth','Fifth','Sixth'];
+  const grandTotal = monthlyWeeks.reduce((sum, w) => sum + weekTotal(w.sales), 0);
+
+  let text = `*ITHRI FRESH JUICE — MONTHLY REPORT*\n`;
+  text += `📍 ${session.locationName}\n📅 ${selectedMonthName}\n\n`;
+
+  monthlyWeeks.forEach((week, i) => {
+    text += `*${i+1}) ${ordinals[i] || `Week ${i+1}`} Week*\n`;
+    text += `Stock sold for the week:\n`;
+    allProducts.forEach(p => { text += `    ${p} = ${week.sales[p] || 0}\n`; });
+    text += `TOTAL = ${weekTotal(week.sales)}\n\n`;
+  });
+
+  text += `*Total for the Month = ${grandTotal}*\n\n`;
+
+  text += `*Total Quantity Per Product:*\n`;
+  allProducts.forEach(p => {
+    const total = monthlyWeeks.reduce((sum, w) => sum + (w.sales[p] || 0), 0);
+    text += `    ${p} = ${total}\n`;
+  });
+
+  text += `\n*Closing Stock — ${prevMonth}:*\n`;
+  Object.entries(prevClosing).forEach(([p, q]) => { text += `    ${q} ${p} in fridge\n`; });
+
+  text += `\n*Opening Stock — ${selectedMonthName}:*\n`;
+  Object.entries(currOpening).forEach(([p, q]) => { text += `    ${q} ${p} in fridge\n`; });
+
+  text += `\n*Closing Stock — ${selectedMonthName}:*\n`;
+  Object.entries(currClosing).forEach(([p, q]) => { text += `    ${q} ${p} in fridge\n`; });
+
+  return text;
+}
+
+async function shareMonthlyWhatsApp() {
+  if (!monthlyWeeks.length) { alert('Please generate the report first.'); return; }
+  const settingsDoc = await db.collection('admin').doc('settings').get();
+  const number = settingsDoc.exists ? (settingsDoc.data().whatsappNumber || '') : '';
+  const text = buildWhatsAppReport();
+  const url = number
+    ? `https://wa.me/${number}?text=${encodeURIComponent(text)}`
+    : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
 }
 
 loadSalesHistory();
