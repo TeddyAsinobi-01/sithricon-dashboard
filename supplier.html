@@ -41,7 +41,7 @@ async function login() {
   if (!settingsDoc.exists || !settingsDoc.data().supplierPassword) {
     await settingsRef.set({ supplierPassword: entered }, { merge: true });
     sessionStorage.setItem('ithri_supplier_auth', 'true');
-    window.location.href = 'dashboard.html';
+    window.location.href = 'dashboard-suppl.html';
     return;
   }
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ithri Supplier - Dashboard</title>
-<link rel="stylesheet" href="../shared/style.css">
+<link rel="stylesheet" href="shared/style.css">
 <style>
   .supply-card { border-left:4px solid var(--yellow); background:#fffbe6; border-radius:var(--radius); padding:16px; margin-bottom:14px; }
   .supply-card.confirmed { border-left-color:var(--green-light); background:#f0faf0; }
@@ -71,7 +71,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
-<script src="../shared/firebase-config.js"></script>
+<script src="shared/firebase-config.js"></script>
 <script>
 if (sessionStorage.getItem('ithri_supplier_auth') !== 'true') window.location.href = 'index.html';
 function logout() { sessionStorage.removeItem('ithri_supplier_auth'); window.location.href = 'index.html'; }
