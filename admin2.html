@@ -53,7 +53,7 @@ async function login() {
 
   if (entered === settingsDoc.data().companyPassword) {
     sessionStorage.setItem('ithri_admin_auth', 'true');
-    window.location.href = 'dashboard.html';
+    window.location.href = 'dashboard-admin.html';
   } else {
     document.getElementById('loginError').classList.remove('hidden');
   }
