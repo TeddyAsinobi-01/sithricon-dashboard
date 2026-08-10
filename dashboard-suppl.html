@@ -133,7 +133,7 @@ function setupTodaySupplies() {
 }
 
 async function confirmDelivery(requestId) {
-  if (!confirm('Confirm this supply was delivered as recorded? This will update the location\\'s stock.')) return;
+  if (!confirm("Confirm this supply was delivered as recorded? This will update the location's stock.")) return;
 
   const reqRef = db.collection('supplyRequests').doc(requestId);
   const reqSnap = await reqRef.get();
