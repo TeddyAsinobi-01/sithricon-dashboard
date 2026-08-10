@@ -228,6 +228,7 @@
       <div class="tab active" data-subtab="sales">Sales History</div>
       <div class="tab" data-subtab="supply">Supply History</div>
       <div class="tab" data-subtab="spoilage">Spoilage & Loss</div>
+      <div class="tab" data-subtab="discrepancy">Discrepancy Records</div>
     </div>
 
     <div id="subtab-sales" class="subtab-content">
@@ -306,6 +307,34 @@
           <table id="spoilageTable" style="min-width:700px; font-size:0.82rem;">
             <thead><tr><th>Date</th><th>Location</th><th>Product</th><th>Type</th><th>Bottles Affected</th><th>Notes</th></tr></thead>
             <tbody><tr><td colspan="6" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="subtab-discrepancy" class="subtab-content hidden">
+      <div class="card">
+        <h2>Filter</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div><label>From Date</label><input type="date" id="discrepancyFromDate" style="margin-bottom:0;"></div>
+          <div><label>To Date</label><input type="date" id="discrepancyToDate" style="margin-bottom:0;"></div>
+        </div>
+        <label>Location</label>
+        <select id="discrepancyLocationSelect" style="margin-bottom:10px;"><option value="">All Locations</option></select>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadDiscrepancyRecords()">Load Records</button>
+          <button class="btn small yellow" onclick="exportDiscrepancyCSV()">⬇️ Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Supply Cancellations & Discrepancies</h2>
+        <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+          Records of supplies cancelled or disputed by the supplier, sorted by date (most recent first).
+        </p>
+        <div style="overflow-x:auto;">
+          <table id="discrepancyRecordsTable" style="min-width:700px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Issue</th><th>Details</th><th>Products Affected</th></tr></thead>
+            <tbody><tr><td colspan="5" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -740,7 +769,7 @@ async function saveWaNumberFromSettings() {
 
 // ===== LOCATIONS TAB =====
 function populateLocationSelects() {
-  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect', 'offDaysLocationSelect', 'spoilageLocationSelect'].forEach(selId => {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect', 'offDaysLocationSelect', 'spoilageLocationSelect', 'discrepancyLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
     const currentVal = sel.value;
     const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
@@ -1039,7 +1068,7 @@ function setDefaultDateFilters() {
   const today = new Date();
   const prior = new Date(today); prior.setDate(prior.getDate() - 30);
   const fmt = d => d.toISOString().split('T')[0];
-  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate'].forEach(id => {
+  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate','discrepancyFromDate','discrepancyToDate'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el.value) el.value = id.includes('From') ? fmt(prior) : fmt(today);
   });
@@ -1447,6 +1476,51 @@ async function saveOffDays() {
   const msg = document.getElementById('offDaysSavedMsg');
   msg.classList.remove('hidden');
   setTimeout(() => msg.classList.add('hidden'), 3000);
+}
+
+// ===== DISCREPANCY RECORDS (Feature 2) =====
+let discrepancyRecordsData = [];
+
+async function loadDiscrepancyRecords() {
+  const locId = document.getElementById('discrepancyLocationSelect').value;
+  const fromDate = document.getElementById('discrepancyFromDate').value;
+  const toDate = document.getElementById('discrepancyToDate').value;
+  const tbody = document.querySelector('#discrepancyRecordsTable tbody');
+  tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+  discrepancyRecordsData = [];
+
+  let query = db.collection('discrepancyRecords').orderBy('date', 'desc').limit(200);
+  const snap = await query.get();
+  const rows = [];
+
+  snap.forEach(doc => {
+    const d = doc.data();
+    if (locId && d.locationId !== locId) return;
+    if (fromDate && d.date < fromDate) return;
+    if (toDate && d.date > toDate) return;
+
+    const productsText = Object.entries(d.items || {}).map(([p, q]) => `${p}: ${q}`).join(', ');
+    rows.push(`<tr>
+      <td>${d.date}</td>
+      <td>${d.locationName}</td>
+      <td><span class="badge red">${d.issueLabel || d.issueType || 'Cancelled'}</span></td>
+      <td>${d.details || '-'}</td>
+      <td>${productsText || '-'}</td>
+    </tr>`);
+    discrepancyRecordsData.push({ date: d.date, location: d.locationName, issue: d.issueLabel || d.issueType || 'Cancelled', details: d.details || '', products: productsText });
+  });
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="5" style="text-align:center; color:var(--gray);">No discrepancy records found for selected filters.</td></tr>';
+}
+
+function exportDiscrepancyCSV() {
+  if (!discrepancyRecordsData.length) { alert('Load records first.'); return; }
+  const headers = ['date','location','issue','details','products'];
+  const csv = [headers.join(','), ...discrepancyRecordsData.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `Ithri_Discrepancy_Records_${todayStr()}.csv`;
+  a.click();
 }
 
 // ===== BOOT =====

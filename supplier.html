@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri Supplier - Login</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body>
+<header class="app-header"><h1><span class="logo-mark">Ithri</span> Supplier Portal</h1></header>
+
+<div class="container" style="max-width:400px; margin-top:60px;">
+  <div class="card">
+    <h2>Supplier Login</h2>
+    <label>Supplier Password</label>
+    <input type="password" id="supplierPassword" placeholder="Enter password">
+    <div id="loginError" class="alert error hidden">Incorrect password.</div>
+    <div id="setupBox" class="alert warn hidden">No supplier password has been set yet. The password you enter now will become the supplier password.</div>
+    <button class="btn yellow" onclick="login()">Login</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script>
+async function checkSetup() {
+  const settingsDoc = await db.collection('admin').doc('settings').get();
+  if (!settingsDoc.exists || !settingsDoc.data().supplierPassword) {
+    document.getElementById('setupBox').classList.remove('hidden');
+  }
+}
+
+async function login() {
+  const entered = document.getElementById('supplierPassword').value.trim();
+  if (!entered) return;
+  const settingsRef = db.collection('admin').doc('settings');
+  const settingsDoc = await settingsRef.get();
+
+  if (!settingsDoc.exists || !settingsDoc.data().supplierPassword) {
+    await settingsRef.set({ supplierPassword: entered }, { merge: true });
+    sessionStorage.setItem('ithri_supplier_auth', 'true');
+    window.location.href = 'dashboard.html';
+    return;
+  }
+
+  if (entered === settingsDoc.data().supplierPassword) {
+    sessionStorage.setItem('ithri_supplier_auth', 'true');
+    window.location.href = 'dashboard-suppl.html';
+  } else {
+    document.getElementById('loginError').classList.remove('hidden');
+  }
+}
+
+document.getElementById('supplierPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+checkSetup();
+</script>
+</body>
+</html>

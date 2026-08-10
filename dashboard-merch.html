@@ -38,25 +38,6 @@
 
   <div id="offDayBanner" class="alert success hidden">🎉 Today is your off day. No clock-in or stock entry needed.</div>
 
-  <!-- Supply Confirmation Banner -->
-  <div id="supplyConfirmBanner" class="supply-confirm-banner hidden">
-    <h3 style="color:#0d47a1; margin-bottom:8px;">📦 New Supply Pending Confirmation</h3>
-    <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">Did you receive the exact amounts below?</p>
-    <div id="supplyConfirmItems" style="margin-bottom:12px;"></div>
-    <div id="supplyDisputeInputs" class="hidden" style="margin-bottom:12px;">
-      <p style="font-size:0.85rem; color:var(--red); font-weight:600; margin-bottom:8px;">Enter the actual quantities you received:</p>
-      <div id="supplyActualInputs"></div>
-      <label>Note for admin (optional)</label>
-      <textarea id="supplyDisputeNote" rows="2" placeholder="e.g. Only 30 bottles delivered, not 50"></textarea>
-      <button class="btn danger" onclick="submitSupplyDispute()">Send Correction to Admin</button>
-      <button class="btn outline" style="margin-top:8px;" onclick="cancelDispute()">Cancel</button>
-    </div>
-    <div id="supplyConfirmButtons" class="flex">
-      <button class="btn yellow" onclick="confirmSupply(true)">✅ Yes, exact amount</button>
-      <button class="btn danger" onclick="showDisputeInputs()">❌ Amount is different</button>
-    </div>
-  </div>
-
   <!-- Stock Profile Card -->
   <div class="stock-profile">
     <h3>📦 Current Available Stock</h3>
@@ -110,7 +91,7 @@
 </div>
 
 <div class="bottom-nav">
-  <a href="dashboard.html" style="text-decoration:none; flex:1;"><div class="nav-item active"><span class="icon">🏠</span>Home</div></a>
+  <a href="dashboard-merch.html" style="text-decoration:none; flex:1;"><div class="nav-item active"><span class="icon">🏠</span>Home</div></a>
   <a href="stock.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">📦</span>Stock</div></a>
   <a href="history.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">📋</span>History</div></a>
 </div>
@@ -128,7 +109,6 @@ const today = todayStr();
 const todayDow = dayOfWeek();
 let locationData = null;
 let todayLog = null;
-let pendingSupplyRequest = null;
 let latenessThreshold = null;
 
 function logout() { clearSession(); window.location.href = 'index.html'; }
@@ -166,103 +146,9 @@ async function init() {
   const settingsDoc = await db.collection('admin').doc('settings').get();
   if (settingsDoc.exists) latenessThreshold = settingsDoc.data().latenessThreshold || null;
 
-  db.collection('supplyRequests')
-    .where('locationId', '==', session.locationId)
-    .where('status', '==', 'pending_confirmation')
-    .onSnapshot(snap => {
-      if (snap.empty) {
-        document.getElementById('supplyConfirmBanner').classList.add('hidden');
-        pendingSupplyRequest = null;
-        return;
-      }
-      // Pick the most recent pending request
-      let latest = null;
-      snap.forEach(doc => {
-        const d = doc.data();
-        if (!latest || (d.createdAt && latest.createdAt && d.createdAt.toMillis() > latest.createdAt.toMillis())) {
-          latest = { id: doc.id, ...d };
-        }
-      });
-      pendingSupplyRequest = latest;
-      renderSupplyConfirmation(pendingSupplyRequest);
-    }, err => {
-      // If index error, fall back to a simple get instead of realtime listener
-      console.warn('supplyRequests listener error, falling back:', err);
-      db.collection('supplyRequests')
-        .where('locationId', '==', session.locationId)
-        .where('status', '==', 'pending_confirmation')
-        .get()
-        .then(snap => {
-          if (snap.empty) return;
-          const doc = snap.docs[0];
-          pendingSupplyRequest = { id: doc.id, ...doc.data() };
-          renderSupplyConfirmation(pendingSupplyRequest);
-        });
-    });
-
   const logDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(today).get();
   todayLog = logDoc.exists ? logDoc.data() : null;
   renderClockState();
-}
-
-// ===== Supply confirmation =====
-function renderSupplyConfirmation(req) {
-  const itemsEl = document.getElementById('supplyConfirmItems');
-  const actualInputsEl = document.getElementById('supplyActualInputs');
-  itemsEl.innerHTML = Object.entries(req.items || {}).map(([p, q]) =>
-    `<div class="flex-between" style="padding:6px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
-      <span>${p}</span><strong>+${q} units</strong></div>`).join('');
-  actualInputsEl.innerHTML = Object.entries(req.items || {}).map(([p, q]) =>
-    `<label>${p} — actual received:</label>
-     <input type="number" min="0" value="${q}" data-actual-product="${p}">`).join('');
-  document.getElementById('supplyDisputeInputs').classList.add('hidden');
-  document.getElementById('supplyConfirmButtons').classList.remove('hidden');
-  document.getElementById('supplyConfirmBanner').classList.remove('hidden');
-}
-
-function showDisputeInputs() {
-  document.getElementById('supplyConfirmButtons').classList.add('hidden');
-  document.getElementById('supplyDisputeInputs').classList.remove('hidden');
-}
-function cancelDispute() {
-  document.getElementById('supplyDisputeInputs').classList.add('hidden');
-  document.getElementById('supplyConfirmButtons').classList.remove('hidden');
-}
-
-async function confirmSupply(received) {
-  if (!pendingSupplyRequest) return;
-  const reqRef = db.collection('supplyRequests').doc(pendingSupplyRequest.id);
-  if (received) {
-    const locRef = db.collection('locations').doc(session.locationId);
-    const locSnap = await locRef.get();
-    const current = { ...(locSnap.data().currentStock || locSnap.data().products || {}) };
-    for (const [p, q] of Object.entries(pendingSupplyRequest.items)) current[p] = (current[p] || 0) + q;
-    await locRef.update({ currentStock: current });
-    await reqRef.update({ status: 'confirmed', confirmedAt: firebase.firestore.FieldValue.serverTimestamp() });
-    alert('Supply confirmed and added to your stock!');
-  }
-  document.getElementById('supplyConfirmBanner').classList.add('hidden');
-}
-
-async function submitSupplyDispute() {
-  if (!pendingSupplyRequest) return;
-  const received = {};
-  document.querySelectorAll('#supplyActualInputs input[data-actual-product]').forEach(i => {
-    received[i.dataset.actualProduct] = parseFloat(i.value) || 0;
-  });
-  const note = document.getElementById('supplyDisputeNote').value.trim();
-  await db.collection('supplyRequests').doc(pendingSupplyRequest.id).update({
-    status: 'disputed', merchandiserReceivedItems: received, disputeNote: note,
-    disputedAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  await db.collection('notifications').add({
-    type: 'supply_disputed', locationId: session.locationId, locationName: session.locationName,
-    supplyRequestId: pendingSupplyRequest.id, items: pendingSupplyRequest.items,
-    merchandiserReceivedItems: received, disputeNote: note, read: false,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  alert('Correction sent to admin. They will update and re-send for your confirmation.');
-  document.getElementById('supplyConfirmBanner').classList.add('hidden');
 }
 
 function renderStockProfile(currentStock, suppliedStock, thresholds) {
