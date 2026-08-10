@@ -47,7 +47,7 @@ async function login() {
     // First time setup - set this as the password
     await settingsRef.set({ companyPassword: entered }, { merge: true });
     sessionStorage.setItem('ithri_admin_auth', 'true');
-    window.location.href = 'dashboard.html';
+    window.location.href = 'dashboard-admin.html';
     return;
   }
 
