@@ -229,6 +229,7 @@
       <div class="tab" data-subtab="supply">Supply History</div>
       <div class="tab" data-subtab="spoilage">Spoilage & Loss</div>
       <div class="tab" data-subtab="discrepancy">Discrepancy Records</div>
+      <div class="tab" data-subtab="attendance">Attendance</div>
     </div>
 
     <div id="subtab-sales" class="subtab-content">
@@ -335,6 +336,34 @@
           <table id="discrepancyRecordsTable" style="min-width:700px; font-size:0.82rem;">
             <thead><tr><th>Date</th><th>Location</th><th>Issue</th><th>Details</th><th>Products Affected</th></tr></thead>
             <tbody><tr><td colspan="5" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="subtab-attendance" class="subtab-content hidden">
+      <div class="card">
+        <h2>Filter</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div><label>From Date</label><input type="date" id="attendanceFromDate" style="margin-bottom:0;"></div>
+          <div><label>To Date</label><input type="date" id="attendanceToDate" style="margin-bottom:0;"></div>
+        </div>
+        <label>Location</label>
+        <select id="attendanceLocationSelect" style="margin-bottom:10px;"><option value="">All Locations</option></select>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadAttendanceGaps()">Load Records</button>
+          <button class="btn small yellow" onclick="exportAttendanceCSV()">⬇️ Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Missed Clock In / Clock Out</h2>
+        <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+          Locations that did not clock in or clock out on their working days within the selected range. Off days are excluded automatically.
+        </p>
+        <div style="overflow-x:auto;">
+          <table id="attendanceTable" style="min-width:600px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Clocked In</th><th>Clocked Out</th></tr></thead>
+            <tbody><tr><td colspan="4" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -568,19 +597,28 @@ function setupRealtimeNotifications() {
             ${n.leakage ? `<div style="font-size:0.85rem; color:var(--red); margin-top:2px;">💧 Leakage: ${JSON.stringify(n.leakage)}</div>` : ''}
             <div class="notif-time">${time}</div>${markBtn}
           </div>`);
-      } else if (n.type === 'low_stock' || n.type === 'supply_disputed') {
-        const itemLines = n.type === 'low_stock'
-          ? Object.entries(n.lowStockItems || {}).map(([p, d]) => `<li><strong>${p}</strong>: ${d.closing} units left (threshold ${d.threshold})</li>`).join('')
-          : Object.entries(n.items || {}).map(([p, q]) => {
-              const rec = n.merchandiserReceivedItems?.[p];
-              return `<li>${p}: Admin recorded ${q}${rec != null ? `, received ${rec}` : ''}</li>`;
-            }).join('');
-        const title = n.type === 'low_stock' ? `📉 Low Stock — ${n.locationName}` : `❌ Supply Disputed — ${n.locationName}`;
+      } else if (n.type === 'low_stock' || n.type === 'supply_disputed' || n.type === 'supply_cancelled') {
+        let itemLines, title;
+        if (n.type === 'low_stock') {
+          itemLines = Object.entries(n.lowStockItems || {}).map(([p, d]) => `<li><strong>${p}</strong>: ${d.closing} units left (threshold ${d.threshold})</li>`).join('');
+          title = `📉 Low Stock — ${n.locationName}`;
+        } else if (n.type === 'supply_cancelled') {
+          itemLines = Object.entries(n.items || {}).map(([p, q]) => `<li>${p}: ${q} units</li>`).join('');
+          title = `❌ Supplier Reported Issue — ${n.locationName}`;
+        } else {
+          itemLines = Object.entries(n.items || {}).map(([p, q]) => {
+            const rec = n.merchandiserReceivedItems?.[p];
+            return `<li>${p}: Admin recorded ${q}${rec != null ? `, received ${rec}` : ''}</li>`;
+          }).join('');
+          title = `❌ Supply Disputed — ${n.locationName}`;
+        }
         supplyItems.push(`
           <div class="notif-item ${n.read ? 'read' : ''}" id="notif-${doc.id}">
             <div style="font-weight:700; margin-bottom:6px;">${title}</div>
             <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
             ${n.disputeNote ? `<div style="font-size:0.85rem; color:#555; margin-top:4px;"><strong>Note:</strong> ${n.disputeNote}</div>` : ''}
+            ${n.details ? `<div style="font-size:0.85rem; color:#555; margin-top:4px;"><strong>Issue:</strong> ${n.issueLabel || ''} — ${n.details}</div>` : ''}
+            ${n.type === 'supply_cancelled' ? `<div style="font-size:0.8rem; color:var(--gray); margin-top:4px;">Go to Supply Stock tab → Pending/Disputed Supply Requests to correct or cancel.</div>` : ''}
             <div class="notif-time">${time}</div>${markBtn}
           </div>`);
       } else if (n.type === 'expiry') {
@@ -769,7 +807,7 @@ async function saveWaNumberFromSettings() {
 
 // ===== LOCATIONS TAB =====
 function populateLocationSelects() {
-  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect', 'offDaysLocationSelect', 'spoilageLocationSelect', 'discrepancyLocationSelect'].forEach(selId => {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect', 'offDaysLocationSelect', 'spoilageLocationSelect', 'discrepancyLocationSelect', 'attendanceLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
     const currentVal = sel.value;
     const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
@@ -936,7 +974,7 @@ async function sendSupplyForConfirmation() {
 // ===== Pending/disputed supply requests management =====
 function renderPendingSupplyList() {
   db.collection('supplyRequests')
-    .where('status', 'in', ['pending_confirmation', 'disputed'])
+    .where('status', 'in', ['pending_confirmation', 'disputed', 'cancelled_pending_admin_review'])
     .onSnapshot(snap => {
       const el = document.getElementById('pendingSupplyList');
       if (snap.empty) { el.innerHTML = '<p style="color:var(--gray); font-size:0.85rem;">No pending requests.</p>'; return; }
@@ -946,19 +984,30 @@ function renderPendingSupplyList() {
         const d = doc.data();
         const itemLines = Object.entries(d.items || {}).map(([p,q]) => `${p}: ${q}`).join(', ');
         const isDisputed = d.status === 'disputed';
+        const isSupplierIssue = d.status === 'cancelled_pending_admin_review';
+        const borderColor = isSupplierIssue ? 'var(--red)' : isDisputed ? 'var(--red)' : 'var(--yellow)';
+        const badgeCls = (isDisputed || isSupplierIssue) ? 'red' : 'yellow';
+        const badgeLabel = isSupplierIssue ? 'Supplier Reported Issue' : isDisputed ? 'Disputed' : 'Awaiting Confirmation';
 
         html += `
-          <div class="card" style="border-left:4px solid ${isDisputed ? 'var(--red)' : 'var(--yellow)'}; margin-bottom:10px;">
+          <div class="card" style="border-left:4px solid ${borderColor}; margin-bottom:10px;">
             <div class="flex-between">
               <strong>${d.locationName}</strong>
-              <span class="badge ${isDisputed ? 'red' : 'yellow'}">${isDisputed ? 'Disputed' : 'Awaiting Confirmation'}</span>
+              <span class="badge ${badgeCls}">${badgeLabel}</span>
             </div>
             <div style="font-size:0.85rem; color:var(--gray); margin:6px 0;">${itemLines}</div>
-            ${isDisputed ? `
+            ${isSupplierIssue ? `
+              <div class="alert error" style="font-size:0.85rem; margin-bottom:8px;">
+                <strong>Issue:</strong> ${d.supplierIssueDetails || d.issueLabel || 'No details given'}
+                ${d.supplierIssueType ? ` <span style="color:var(--gray);">(${d.supplierIssueType.replace(/_/g,' ')})</span>` : ''}
+              </div>` : ''}
+            ${(isDisputed || isSupplierIssue) ? `
               <div class="flex" style="margin-top:8px;">
-                <button class="btn small yellow" onclick="correctSupply('${doc.id}', '${d.locationId}')">Correct & Re-send</button>
+                <button class="btn small yellow" onclick="openCorrectSupplyForm('${doc.id}')">✏️ Correct & Re-send</button>
                 <button class="btn small danger" onclick="cancelSupply('${doc.id}')">Cancel Supply</button>
-              </div>` : `
+              </div>
+              <div id="correctForm-${doc.id}" class="hidden" style="margin-top:10px; padding-top:10px; border-top:1px solid var(--light-gray);"></div>
+              ` : `
               <button class="btn small outline" onclick="cancelSupply('${doc.id}')" style="margin-top:8px;">Cancel Request</button>`}
           </div>`;
       });
@@ -973,20 +1022,61 @@ async function cancelSupply(requestId) {
   });
 }
 
-async function correctSupply(requestId, locationId) {
-  const newQty = prompt('Enter corrected quantities as "Product:Qty, Product2:Qty2" or cancel to leave unchanged:');
-  if (!newQty) return;
+// Opens an inline correction form pre-filled with the original products — admin only edits quantities
+async function openCorrectSupplyForm(requestId) {
+  const formEl = document.getElementById(`correctForm-${requestId}`);
+  if (!formEl) return;
+
+  // Toggle closed if already open
+  if (!formEl.classList.contains('hidden')) {
+    formEl.classList.add('hidden');
+    formEl.innerHTML = '';
+    return;
+  }
+
+  const reqSnap = await db.collection('supplyRequests').doc(requestId).get();
+  const req = reqSnap.data();
+  const items = req.items || {};
+
+  const rowsHtml = Object.entries(items).map(([product, qty]) => `
+    <div class="flex" style="margin-bottom:8px; align-items:center;">
+      <div style="flex:2; font-weight:600;">${product}</div>
+      <input type="number" min="0" value="${qty}" data-correct-product="${product}" style="flex:1; margin-bottom:0;">
+    </div>`).join('');
+
+  formEl.innerHTML = `
+    <p style="font-size:0.85rem; color:var(--gray); margin-bottom:8px;">Adjust the quantities below, then re-send to the supplier for confirmation:</p>
+    ${rowsHtml}
+    <button class="btn small yellow" style="margin-top:8px;" onclick="submitCorrectedSupply('${requestId}')">Re-send Corrected Supply</button>
+  `;
+  formEl.classList.remove('hidden');
+}
+
+async function submitCorrectedSupply(requestId) {
+  const formEl = document.getElementById(`correctForm-${requestId}`);
   const items = {};
-  newQty.split(',').forEach(pair => {
-    const [name, qty] = pair.split(':').map(s => s.trim());
-    if (name && qty) items[name] = parseFloat(qty) || 0;
+  formEl.querySelectorAll('input[data-correct-product]').forEach(input => {
+    const qty = parseFloat(input.value) || 0;
+    items[input.dataset.correctProduct] = qty;
   });
-  if (Object.keys(items).length === 0) { alert('No valid items entered.'); return; }
+
+  if (Object.keys(items).length === 0) { alert('No products to send.'); return; }
 
   await db.collection('supplyRequests').doc(requestId).update({
-    items, status: 'pending_confirmation', correctedAt: firebase.firestore.FieldValue.serverTimestamp()
+    items,
+    status: 'pending_confirmation',
+    correctedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    // Clear old issue/dispute flags since this is a fresh corrected request
+    supplierIssueDetails: firebase.firestore.FieldValue.delete(),
+    supplierIssueType: firebase.firestore.FieldValue.delete(),
+    cancelledBySupplier: firebase.firestore.FieldValue.delete(),
+    merchandiserReceivedItems: firebase.firestore.FieldValue.delete(),
+    disputeNote: firebase.firestore.FieldValue.delete()
   });
-  alert('Corrected supply sent back to merchandiser for confirmation.');
+
+  formEl.classList.add('hidden');
+  formEl.innerHTML = '';
+  alert('Corrected supply sent back to the supplier for confirmation.');
 }
 
 // ===== THRESHOLDS (Feature 1) =====
@@ -1068,7 +1158,7 @@ function setDefaultDateFilters() {
   const today = new Date();
   const prior = new Date(today); prior.setDate(prior.getDate() - 30);
   const fmt = d => d.toISOString().split('T')[0];
-  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate','discrepancyFromDate','discrepancyToDate'].forEach(id => {
+  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate','discrepancyFromDate','discrepancyToDate','attendanceFromDate','attendanceToDate'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el.value) el.value = id.includes('From') ? fmt(prior) : fmt(today);
   });
@@ -1196,7 +1286,7 @@ async function loadSupplyReports() {
 
   entries.forEach(({ d, dateStr }) => {
     const date = dateStr ? new Date(dateStr).toLocaleDateString('en-GB') : '-';
-    const statusLabel = {confirmed:'Confirmed',disputed:'Disputed',cancelled:'Cancelled',pending_confirmation:'Awaiting Confirmation'}[d.status] || 'Pending';
+    const statusLabel = {confirmed:'Confirmed',disputed:'Disputed',cancelled:'Cancelled',pending_confirmation:'Awaiting Confirmation',cancelled_pending_admin_review:'Issue Reported'}[d.status] || 'Pending';
     const statusColor = d.status==='confirmed' ? 'var(--green-main)' : (d.status==='disputed'||d.status==='cancelled') ? 'var(--red)' : '#856404';
     const products = Object.keys(d.items || {});
 
@@ -1520,6 +1610,78 @@ function exportDiscrepancyCSV() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = `Ithri_Discrepancy_Records_${todayStr()}.csv`;
+  a.click();
+}
+
+// ===== ATTENDANCE — MISSED CLOCK IN/OUT (Feature 2) =====
+let attendanceData = [];
+
+function dateRangeArray(from, to) {
+  const dates = [];
+  const cur = new Date(from);
+  const end = new Date(to);
+  while (cur <= end) {
+    dates.push(cur.toISOString().split('T')[0]);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+function dowFromDateStr(dateStr) {
+  return new Date(dateStr + 'T12:00:00').getDay();
+}
+
+async function loadAttendanceGaps() {
+  const fromDate = document.getElementById('attendanceFromDate').value;
+  const toDate = document.getElementById('attendanceToDate').value;
+  const locId = document.getElementById('attendanceLocationSelect').value;
+  if (!fromDate || !toDate) { alert('Please select both a from and to date.'); return; }
+  if (fromDate > toDate) { alert('From date must be before to date.'); return; }
+
+  const tbody = document.querySelector('#attendanceTable tbody');
+  tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+  attendanceData = [];
+
+  const dates = dateRangeArray(fromDate, toDate);
+  const locationsToCheck = locId ? allLocations.filter(l => l.id === locId) : allLocations;
+  const rows = [];
+
+  for (const loc of locationsToCheck) {
+    const offDays = loc.offDays || [];
+    const workDates = dates.filter(d => !offDays.includes(dowFromDateStr(d)));
+
+    for (const date of workDates) {
+      const logDoc = await db.collection('locations').doc(loc.id).collection('logs').doc(date).get();
+      const log = logDoc.exists ? logDoc.data() : null;
+      const clockedIn = !!(log && log.clockIn);
+      const clockedOut = !!(log && log.clockOut);
+
+      if (!clockedIn || !clockedOut) {
+        rows.push(`<tr>
+          <td>${date}</td>
+          <td>${loc.name}</td>
+          <td style="color:${clockedIn ? 'var(--green-main)' : 'var(--red)'}; font-weight:700;">${clockedIn ? '✅ Yes' : '❌ No'}</td>
+          <td style="color:${clockedOut ? 'var(--green-main)' : 'var(--red)'}; font-weight:700;">${clockedOut ? '✅ Yes' : '❌ No'}</td>
+        </tr>`);
+        attendanceData.push({ date, location: loc.name, clockedIn: clockedIn ? 'Yes' : 'No', clockedOut: clockedOut ? 'Yes' : 'No' });
+      }
+    }
+  }
+
+  // Sort by date descending
+  rows.reverse();
+  attendanceData.reverse();
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="4" style="text-align:center; color:var(--gray);">✅ No missed clock in/out found for the selected filters.</td></tr>';
+}
+
+function exportAttendanceCSV() {
+  if (!attendanceData.length) { alert('Load records first.'); return; }
+  const headers = ['date','location','clockedIn','clockedOut'];
+  const csv = [headers.join(','), ...attendanceData.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `Ithri_Attendance_${todayStr()}.csv`;
   a.click();
 }
 

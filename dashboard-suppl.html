@@ -90,7 +90,7 @@ let activeIssueRequestId = null;
 // ===== TODAY'S SUPPLIES =====
 function setupTodaySupplies() {
   db.collection('supplyRequests')
-    .where('status', 'in', ['pending_confirmation', 'disputed'])
+    .where('status', 'in', ['pending_confirmation', 'disputed', 'cancelled_pending_admin_review'])
     .onSnapshot(snap => {
       const listEl = document.getElementById('todaySuppliesList');
       if (snap.empty) {
@@ -114,18 +114,31 @@ function setupTodaySupplies() {
         grouped[date].forEach(req => {
           const itemRows = Object.entries(req.items || {}).map(([p, q]) =>
             `<div class="item-row"><span>${p}</span><strong>${q} units</strong></div>`).join('');
-          html += `
-            <div class="supply-card">
-              <div class="flex-between" style="margin-bottom:8px;">
-                <strong>📍 ${req.locationName}</strong>
-                <span class="badge yellow">Pending</span>
-              </div>
-              ${itemRows}
-              <div class="flex" style="margin-top:12px;">
-                <button class="btn yellow" onclick="confirmDelivery('${req.id}')">✅ Confirm Delivered</button>
-                <button class="btn danger" onclick="openIssueModal('${req.id}')">⚠️ Raise Issue</button>
-              </div>
-            </div>`;
+
+          if (req.status === 'cancelled_pending_admin_review') {
+            html += `
+              <div class="supply-card issue">
+                <div class="flex-between" style="margin-bottom:8px;">
+                  <strong>📍 ${req.locationName}</strong>
+                  <span class="badge red">Awaiting Admin Review</span>
+                </div>
+                ${itemRows}
+                <div class="alert error" style="margin-top:8px; font-size:0.85rem;"><strong>Issue reported:</strong> ${req.supplierIssueDetails || ''}</div>
+              </div>`;
+          } else {
+            html += `
+              <div class="supply-card">
+                <div class="flex-between" style="margin-bottom:8px;">
+                  <strong>📍 ${req.locationName}</strong>
+                  <span class="badge yellow">Pending</span>
+                </div>
+                ${itemRows}
+                <div class="flex" style="margin-top:12px;">
+                  <button class="btn yellow" onclick="confirmDelivery('${req.id}')">✅ Confirm Delivered</button>
+                  <button class="btn danger" onclick="openIssueModal('${req.id}')">⚠️ Raise Issue</button>
+                </div>
+              </div>`;
+          }
         });
       });
       listEl.innerHTML = html;
@@ -183,16 +196,16 @@ async function submitIssue() {
     other: 'Other issue'
   };
 
-  // Cancel the supply request
+  // Flag for admin review instead of a dead-end cancellation
   await reqRef.update({
-    status: 'cancelled',
+    status: 'cancelled_pending_admin_review',
     cancelledBySupplier: true,
     supplierIssueType: issueType,
     supplierIssueDetails: details,
     cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
   });
 
-  // Log to discrepancy records (Feature 2)
+  // Log to discrepancy records
   await db.collection('discrepancyRecords').add({
     type: 'supply_cancelled',
     locationId: req.locationId,
@@ -211,6 +224,7 @@ async function submitIssue() {
     type: 'supply_cancelled',
     locationId: req.locationId,
     locationName: req.locationName,
+    supplyRequestId: activeIssueRequestId,
     items: req.items,
     issueLabel: issueLabels[issueType],
     details,
@@ -219,7 +233,7 @@ async function submitIssue() {
   });
 
   closeIssueModal();
-  alert('Issue reported and supply cancelled. Admin has been notified.');
+  alert('Issue reported. This supply is now awaiting admin review — they can correct and re-send it, or cancel it entirely.');
 }
 
 // ===== SUPPLY HISTORY =====
@@ -246,15 +260,15 @@ async function loadSupplyHistory() {
     if (fromDate && dateStr < fromDate) return;
     if (toDate && dateStr > toDate) return;
 
-    const statusLabel = { confirmed: 'Confirmed', disputed: 'Disputed', cancelled: 'Cancelled', pending_confirmation: 'Pending' }[d.status] || 'Pending';
-    const cardClass = d.status === 'confirmed' ? 'confirmed' : (d.status === 'cancelled' || d.status === 'disputed') ? 'issue' : '';
+    const statusLabel = { confirmed: 'Confirmed', disputed: 'Disputed', cancelled: 'Cancelled', pending_confirmation: 'Pending', cancelled_pending_admin_review: 'Issue Reported — Awaiting Admin' }[d.status] || 'Pending';
+    const cardClass = d.status === 'confirmed' ? 'confirmed' : (d.status === 'cancelled' || d.status === 'disputed' || d.status === 'cancelled_pending_admin_review') ? 'issue' : '';
     const itemRows = Object.entries(d.items || {}).map(([p, q]) => `<div class="item-row"><span>${p}</span><strong>${q} units</strong></div>`).join('');
 
     rows.push(`
       <div class="supply-card ${cardClass}">
         <div class="flex-between" style="margin-bottom:8px;">
           <strong>📍 ${d.locationName}</strong>
-          <span class="badge ${d.status === 'confirmed' ? 'green' : (d.status === 'cancelled' || d.status === 'disputed') ? 'red' : 'yellow'}">${statusLabel}</span>
+          <span class="badge ${d.status === 'confirmed' ? 'green' : (d.status === 'cancelled' || d.status === 'disputed' || d.status === 'cancelled_pending_admin_review') ? 'red' : 'yellow'}">${statusLabel}</span>
         </div>
         <div style="font-size:0.78rem; color:var(--gray); margin-bottom:6px;">${dateStr}</div>
         ${itemRows}
