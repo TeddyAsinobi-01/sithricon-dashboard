@@ -245,6 +245,7 @@
       <div class="tab" data-subtab="discrepancy">Discrepancy Records</div>
       <div class="tab" data-subtab="attendance">Attendance</div>
       <div class="tab" data-subtab="supplyneeded">Supply Needed</div>
+      <div class="tab" data-subtab="stockadjustments">Stock Adjustments</div>
     </div>
 
     <div id="subtab-sales" class="subtab-content">
@@ -409,6 +410,34 @@
         </div>
       </div>
     </div>
+
+    <div id="subtab-stockadjustments" class="subtab-content hidden">
+      <div class="card">
+        <h2>Filter</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div><label>From Date</label><input type="date" id="adjustmentsFromDate" style="margin-bottom:0;"></div>
+          <div><label>To Date</label><input type="date" id="adjustmentsToDate" style="margin-bottom:0;"></div>
+        </div>
+        <label>Location</label>
+        <select id="adjustmentsLocationSelect" style="margin-bottom:10px;"><option value="">All Locations</option></select>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadStockAdjustments()">Load Records</button>
+          <button class="btn small yellow" onclick="exportAdjustmentsCSV()">⬇️ Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Stock Corrections & Direct Additions</h2>
+        <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+          Every use of "Edit / Correct Stock" and "Direct Stock Add (Emergency)" is logged here, sorted by date (most recent first). Shows all locations affected together, or filter to one location above.
+        </p>
+        <div style="overflow-x:auto;">
+          <table id="stockAdjustmentsTable" style="min-width:750px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Type</th><th>Product</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
+            <tbody><tr><td colspan="7" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- SETTINGS TAB -->
@@ -500,20 +529,36 @@ document.querySelectorAll('.tab-content .tabs .tab').forEach(tab => {
     document.querySelectorAll('.subtab-content').forEach(c => c.classList.add('hidden'));
     document.getElementById(`subtab-${tab.dataset.subtab}`).classList.remove('hidden');
 
-    // Auto-load on first open (all locations by default)
+    // Auto-load on first open (all locations by default). Waits for allLocations to
+    // be populated first, so the "all locations" default doesn't silently show empty
+    // results if the realtime listener hasn't resolved yet.
     if (tab.dataset.subtab === 'attendance' && !tab.dataset.loaded) {
       tab.dataset.loaded = 'true';
-      loadAttendanceGaps();
+      waitForLocationsThen(loadAttendanceGaps);
     }
     if (tab.dataset.subtab === 'supplyneeded' && !tab.dataset.loaded) {
       tab.dataset.loaded = 'true';
-      loadSupplyNeededRecords();
+      waitForLocationsThen(loadSupplyNeededRecords);
+    }
+    if (tab.dataset.subtab === 'stockadjustments' && !tab.dataset.loaded) {
+      tab.dataset.loaded = 'true';
+      waitForLocationsThen(loadStockAdjustments);
     }
   });
 });
 
 const today = todayStr();
 let allLocations = [];
+
+// Retries the given function every 200ms until allLocations has been populated
+// by the realtime listener, so "load all locations" never fires against an empty array.
+function waitForLocationsThen(fn, attemptsLeft = 25) {
+  if (allLocations.length > 0 || attemptsLeft <= 0) {
+    fn();
+    return;
+  }
+  setTimeout(() => waitForLocationsThen(fn, attemptsLeft - 1), 200);
+}
 
 // ===== OVERVIEW REAL-TIME =====
 function setupRealtimeOverview() {
@@ -981,7 +1026,7 @@ async function saveWaNumberFromSettings() {
 
 // ===== LOCATIONS TAB =====
 function populateLocationSelects() {
-  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect', 'offDaysLocationSelect', 'spoilageLocationSelect', 'discrepancyLocationSelect', 'attendanceLocationSelect'].forEach(selId => {
+  ['stockLocationSelect', 'reportLocationSelect', 'merchPwLocationSelect', 'thresholdLocationSelect', 'editStockLocationSelect', 'supplyReportLocationSelect', 'directStockLocationSelect', 'offDaysLocationSelect', 'spoilageLocationSelect', 'discrepancyLocationSelect', 'attendanceLocationSelect', 'adjustmentsLocationSelect'].forEach(selId => {
     const sel = document.getElementById(selId);
     const currentVal = sel.value;
     const isAllOption = selId === 'reportLocationSelect' || selId === 'supplyReportLocationSelect';
@@ -1313,12 +1358,26 @@ async function saveStockEdit() {
   if (!locId) { alert('Select a location.'); return; }
   if (!confirm('This will directly overwrite the current stock figures. Continue?')) return;
 
+  const loc = allLocations.find(l => l.id === locId);
+  const previousStock = { ...(loc?.currentStock || loc?.products || {}) };
   const newCurrent = {};
   document.querySelectorAll('#editStockInputs input[data-edit-product]').forEach(input => {
     newCurrent[input.dataset.editProduct] = parseFloat(input.value) || 0;
   });
 
   await db.collection('locations').doc(locId).update({ currentStock: newCurrent });
+
+  // Audit log for Reports & History → Stock Adjustments
+  await db.collection('stockAdjustments').add({
+    type: 'correction',
+    locationId: locId,
+    locationName: loc?.name || '',
+    previousStock,
+    newStock: newCurrent,
+    date: todayStr(),
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
   const msg = document.getElementById('editStockMsg');
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
@@ -1332,7 +1391,7 @@ function setDefaultDateFilters() {
   const today = new Date();
   const prior = new Date(today); prior.setDate(prior.getDate() - 30);
   const fmt = d => d.toISOString().split('T')[0];
-  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate','discrepancyFromDate','discrepancyToDate','attendanceFromDate','attendanceToDate','supplyNeededFromDate','supplyNeededToDate'].forEach(id => {
+  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate','discrepancyFromDate','discrepancyToDate','attendanceFromDate','attendanceToDate','supplyNeededFromDate','supplyNeededToDate','adjustmentsFromDate','adjustmentsToDate'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el.value) el.value = id.includes('From') ? fmt(prior) : fmt(today);
   });
@@ -1687,6 +1746,7 @@ async function saveDirectStock() {
   if (!locId) { alert('Please select a location.'); return; }
   if (!confirm('This adds stock immediately without merchandiser confirmation. Proceed?')) return;
   const loc = allLocations.find(l => l.id === locId);
+  const previousStock = { ...(loc.currentStock || loc.products || {}) };
   const current = { ...(loc.currentStock || loc.products || {}) };
   const supplied = { ...(loc.products || {}) };
   const addedItems = {};
@@ -1706,6 +1766,19 @@ async function saveDirectStock() {
     status: 'confirmed', addedByAdmin: true, bypassConfirmation: true,
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
+
+  // Audit log for Reports & History → Stock Adjustments
+  await db.collection('stockAdjustments').add({
+    type: 'direct_add',
+    locationId: locId,
+    locationName: loc.name,
+    previousStock,
+    newStock: current,
+    itemsAdded: addedItems,
+    date: todayStr(),
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
   const msg = document.getElementById('directStockMsg');
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
   renderDirectStockInputs();
@@ -1899,6 +1972,72 @@ function exportSupplyNeededCSV() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = `Ithri_SupplyNeeded_${todayStr()}.csv`;
+  a.click();
+}
+
+// ===== STOCK ADJUSTMENTS (Edit/Correct + Direct Add audit trail) =====
+let stockAdjustmentsData = [];
+
+async function loadStockAdjustments() {
+  const locId = document.getElementById('adjustmentsLocationSelect').value;
+  const fromDate = document.getElementById('adjustmentsFromDate').value;
+  const toDate = document.getElementById('adjustmentsToDate').value;
+  const tbody = document.querySelector('#stockAdjustmentsTable tbody');
+  tbody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+  stockAdjustmentsData = [];
+
+  const snap = await db.collection('stockAdjustments').orderBy('date', 'desc').limit(300).get();
+  const rows = [];
+
+  snap.forEach(doc => {
+    const d = doc.data();
+    if (locId && d.locationId !== locId) return;
+    if (fromDate && d.date < fromDate) return;
+    if (toDate && d.date > toDate) return;
+
+    const typeLabel = d.type === 'direct_add' ? '⚡ Direct Add' : '✏️ Correction';
+    const typeColor = d.type === 'direct_add' ? 'var(--red)' : '#1565C0';
+
+    // Show one row per product touched (union of before/after keys)
+    const allProducts = new Set([...Object.keys(d.previousStock || {}), ...Object.keys(d.newStock || {})]);
+
+    if (allProducts.size === 0) {
+      rows.push(`<tr><td>${d.date}</td><td>${d.locationName}</td><td style="color:${typeColor}; font-weight:700;">${typeLabel}</td><td colspan="4" style="color:var(--gray);">No product detail recorded</td></tr>`);
+      return;
+    }
+
+    let firstRow = true;
+    allProducts.forEach(product => {
+      const before = d.previousStock?.[product] ?? 0;
+      const after = d.newStock?.[product] ?? 0;
+      const diff = after - before;
+      if (diff === 0 && d.type === 'correction') return; // skip unchanged products in a correction (noise reduction)
+
+      const diffText = diff === 0 ? 'No change' : `${diff > 0 ? '+' : ''}${diff}`;
+      const diffColor = diff > 0 ? 'var(--green-main)' : diff < 0 ? 'var(--red)' : 'var(--gray)';
+
+      rows.push(`<tr>
+        ${firstRow ? `<td>${d.date}</td><td>${d.locationName}</td><td style="color:${typeColor}; font-weight:700;">${typeLabel}</td>` : `<td></td><td></td><td></td>`}
+        <td>${product}</td>
+        <td>${before}</td>
+        <td>${after}</td>
+        <td style="color:${diffColor}; font-weight:700;">${diffText}</td>
+      </tr>`);
+      stockAdjustmentsData.push({ date: d.date, location: d.locationName, type: typeLabel.replace(/[⚡✏️]\s*/,''), product, before, after, change: diffText });
+      firstRow = false;
+    });
+  });
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="7" style="text-align:center; color:var(--gray);">No stock adjustment records found for selected filters.</td></tr>';
+}
+
+function exportAdjustmentsCSV() {
+  if (!stockAdjustmentsData.length) { alert('Load records first.'); return; }
+  const headers = ['date','location','type','product','before','after','change'];
+  const csv = [headers.join(','), ...stockAdjustmentsData.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `Ithri_StockAdjustments_${todayStr()}.csv`;
   a.click();
 }
 
