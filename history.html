@@ -203,14 +203,15 @@ async function loadSalesHistory() {
     const statusLabel = d.status === 'submitted' ? 'Submitted' : d.status === 'flagged' ? 'Flagged' : 'Pending';
     const statusColor = d.status === 'submitted' ? 'var(--green-main)' : d.status === 'flagged' ? 'var(--red)' : 'var(--gray)';
     const products = d.soldQty ? Object.keys(d.soldQty) : [];
+    const backfillTag = d.backfilled ? ` <span class="badge" style="background:#1565C0; color:#fff; font-size:0.68rem;">Backfilled</span>` : '';
 
     if (products.length === 0) {
       rows.push(`<tr>
         <td>${d.date}</td><td>${d.clockIn||'-'}</td><td>${d.clockOut||'-'}</td>
         <td colspan="5" style="color:var(--gray);">No report submitted</td>
-        <td style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+        <td style="color:${statusColor};font-weight:700;">${statusLabel}${backfillTag}</td>
       </tr>`);
-      salesData.push({ date:d.date, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', discrepancy:'', status:statusLabel });
+      salesData.push({ date:d.date, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', discrepancy:'', status:statusLabel + (d.backfilled ? ' (Backfilled)' : '') });
     } else {
       products.forEach((product, idx) => {
         const disc = d.discrepancy?.[product];
@@ -225,9 +226,9 @@ async function loadSalesHistory() {
           <td><strong>${d.soldQty[product]}</strong></td>
           <td>${d.closingStock?.[product]??'-'}</td>
           <td style="color:${disc?'var(--red)':'inherit'};">${discText}</td>
-          ${idx===0 ? `<td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>` : ''}
+          ${idx===0 ? `<td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}${backfillTag}</td>` : ''}
         </tr>`);
-        salesData.push({ date:d.date, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', discrepancy:discText, status:statusLabel });
+        salesData.push({ date:d.date, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', discrepancy:discText, status:statusLabel + (d.backfilled ? ' (Backfilled)' : '') });
       });
     }
   });

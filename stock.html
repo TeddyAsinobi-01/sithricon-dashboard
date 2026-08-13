@@ -16,17 +16,20 @@
 
   <div id="loadingMsg" class="card"><p>Loading today's products...</p></div>
 
-  <!-- Feature 1: Carry forward yesterday -->
-  <div id="carryForwardBanner" class="card hidden" style="border:2px solid #1565C0;">
-    <h3 style="color:#0d47a1; margin-bottom:8px;">📅 Missed Yesterday's Report?</h3>
-    <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
-      It looks like yesterday's report was not submitted. You can carry forward yesterday's closing stock as today's opening stock.
+  <!-- Mandatory backfill: any missed working day's report must be submitted before today's form -->
+  <div id="backfillBanner" class="card hidden" style="border:2px solid #1565C0;">
+    <h3 style="color:#0d47a1; margin-bottom:8px;">📅 Please Submit Your Missed Report First</h3>
+    <p id="backfillProgress" style="font-size:0.78rem; color:#1565C0; font-weight:600; margin-bottom:6px;"></p>
+    <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">
+      No report was sent for <strong id="backfillDateLabel">that day</strong>. Before you can continue, please enter what you sold on <strong id="backfillDateLabel2">that day</strong> so your sales records stay accurate.
     </p>
-    <div id="yesterdayStockPreview" style="margin-bottom:12px;"></div>
-    <div class="flex">
-      <button class="btn yellow" onclick="carryForwardYesterday()">✅ Use Yesterday's Stock</button>
-      <button class="btn outline" onclick="dismissCarryForward()">Use Current Stock</button>
+    <div class="card" style="background:var(--light-gray); margin-bottom:12px;">
+      <h3 style="margin-bottom:8px;">Opening Stock (as at that day)</h3>
+      <div id="backfillOpeningList"></div>
     </div>
+    <div id="backfillSoldInputs"></div>
+    <button class="btn yellow" onclick="submitBackfillReport()">Submit Missed Report</button>
+    <div id="backfillError" class="alert error hidden" style="margin-top:10px;"></div>
   </div>
 
   <div id="mainContent" class="hidden">
@@ -125,12 +128,22 @@ const session = getSession();
 if (!session.locationId) window.location.href = 'index.html';
 
 const today = todayStr();
-const yesterday = todayStr(new Date(Date.now() - 86400000));
 let openingStock = {};
 let suppliedStock = {};
 let thresholds = {};
 let calculatedData = null;
-let yesterdayClosingStock = null;
+let locationOffDays = [];
+let backfillOpeningStock = null;
+let backfillQueue = [];   // array of date strings (oldest first) still needing a report
+let backfillIndex = 0;    // which one in the queue we're currently showing
+
+function dayOfWeekFromDateStr(dateStr) {
+  return new Date(dateStr + 'T12:00:00').getDay();
+}
+
+function dateStrMinusDays(n) {
+  return todayStr(new Date(Date.now() - n * 86400000));
+}
 
 async function init() {
   try {
@@ -139,6 +152,7 @@ async function init() {
 
     suppliedStock = locationData.products || {};
     thresholds = locationData.thresholds || {};
+    locationOffDays = locationData.offDays || [];
     openingStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
       ? locationData.currentStock
       : suppliedStock;
@@ -156,14 +170,34 @@ async function init() {
       return;
     }
 
-    // Feature 1: Check if yesterday was missed
-    const yesterdayLogDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(yesterday).get();
-    const yesterdaySubmitted = yesterdayLogDoc.exists &&
-      (yesterdayLogDoc.data().status === 'submitted' || yesterdayLogDoc.data().status === 'flagged');
+    // Mandatory gate: scan backward through recent working days (skip off days) for any missed reports.
+    // Stops as soon as it finds a day that was already submitted, hits the feature's launch date floor,
+    // or after 14 days back (safety limit). Days before BACKFILL_FLOOR_DATE are never touched —
+    // they were already handled under the old process.
+    const BACKFILL_FLOOR_DATE = '2026-08-13'; // this feature's launch date — nothing before this is scanned
+    backfillQueue = [];
+    for (let n = 1; n <= 14; n++) {
+      const checkDate = dateStrMinusDays(n);
+      if (checkDate < BACKFILL_FLOOR_DATE) break; // never scan prior to launch day
 
-    if (!yesterdaySubmitted && locationData.currentStock && Object.keys(locationData.currentStock).length > 0) {
-      yesterdayClosingStock = locationData.currentStock;
-      showCarryForwardBanner();
+      const wasOffDay = locationOffDays.includes(dayOfWeekFromDateStr(checkDate));
+      if (wasOffDay) continue; // off days never need a report — skip and keep scanning further back
+
+      const checkLogDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(checkDate).get();
+      const wasSubmitted = checkLogDoc.exists &&
+        (checkLogDoc.data().status === 'submitted' || checkLogDoc.data().status === 'flagged');
+
+      if (wasSubmitted) break; // found a submitted working day — nothing missed beyond this point
+      backfillQueue.push(checkDate);
+    }
+
+    if (backfillQueue.length > 0) {
+      backfillQueue.reverse(); // oldest missed day first
+      backfillIndex = 0;
+      backfillOpeningStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
+        ? locationData.currentStock
+        : suppliedStock;
+      showBackfillGate();
       return;
     }
 
@@ -176,27 +210,91 @@ async function init() {
   }
 }
 
-function showCarryForwardBanner() {
-  const preview = document.getElementById('yesterdayStockPreview');
-  preview.innerHTML = Object.entries(yesterdayClosingStock).map(([p, q]) =>
-    `<div class="flex-between" style="padding:4px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
-      <span>${p}</span><strong>${q} units</strong>
-    </div>`).join('');
+function showBackfillGate() {
+  const targetDate = backfillQueue[backfillIndex];
+  const dateLabelText = new Date(targetDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const remaining = backfillQueue.length - backfillIndex;
+
+  document.getElementById('backfillDateLabel').textContent = dateLabelText;
+  document.getElementById('backfillDateLabel2').textContent = dateLabelText;
+
+  const progressEl = document.getElementById('backfillProgress');
+  if (progressEl) {
+    progressEl.textContent = remaining > 1
+      ? `Missed report ${backfillIndex + 1} of ${backfillQueue.length} — ${remaining - 1} more after this one.`
+      : `Last missed report — you'll reach today's form right after this.`;
+  }
+
+  const openingList = document.getElementById('backfillOpeningList');
+  const soldInputsEl = document.getElementById('backfillSoldInputs');
+  openingList.innerHTML = '';
+  soldInputsEl.innerHTML = '';
+
+  for (const [product, qty] of Object.entries(backfillOpeningStock)) {
+    openingList.innerHTML += `
+      <div class="flex-between" style="padding:6px 0; border-bottom:1px solid #ddd; font-size:0.9rem;">
+        <span>${product}</span><strong>${qty} units</strong>
+      </div>`;
+    soldInputsEl.innerHTML += `<label>${product} — units sold on ${dateLabelText}</label><input type="number" min="0" id="backfill_sold_${sanitize(product)}" placeholder="0">`;
+  }
+
   document.getElementById('loadingMsg').classList.add('hidden');
-  document.getElementById('carryForwardBanner').classList.remove('hidden');
+  document.getElementById('backfillBanner').classList.remove('hidden');
+  document.getElementById('backfillError').classList.add('hidden');
 }
 
-function carryForwardYesterday() {
-  openingStock = { ...yesterdayClosingStock };
-  document.getElementById('carryForwardBanner').classList.add('hidden');
-  renderForms();
-  document.getElementById('mainContent').classList.remove('hidden');
-}
+async function submitBackfillReport() {
+  const targetDate = backfillQueue[backfillIndex];
+  const soldQty = {};
+  const closingStock = {};
+  let valid = true;
 
-function dismissCarryForward() {
-  document.getElementById('carryForwardBanner').classList.add('hidden');
-  renderForms();
-  document.getElementById('mainContent').classList.remove('hidden');
+  for (const product of Object.keys(backfillOpeningStock)) {
+    const key = sanitize(product);
+    const soldVal = parseFloat(document.getElementById(`backfill_sold_${key}`).value);
+    if (isNaN(soldVal) || soldVal < 0) { valid = false; break; }
+    soldQty[product] = soldVal;
+    closingStock[product] = Math.max(0, backfillOpeningStock[product] - soldVal);
+  }
+
+  if (!valid) {
+    document.getElementById('backfillError').textContent = 'Please enter a valid sold quantity (0 or more) for every product.';
+    document.getElementById('backfillError').classList.remove('hidden');
+    return;
+  }
+
+  const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(targetDate);
+  const locRef = db.collection('locations').doc(session.locationId);
+
+  try {
+    await logRef.set({
+      date: targetDate, locationId: session.locationId, locationName: session.locationName,
+      openingStock: backfillOpeningStock, closingStock, soldQty,
+      status: 'submitted', backfilled: true,
+      backfilledOn: today,
+      submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // Each backfilled day's closing stock becomes the opening for the next missed day (or today)
+    await locRef.update({ currentStock: closingStock });
+    backfillOpeningStock = { ...closingStock };
+
+    backfillIndex++;
+    if (backfillIndex < backfillQueue.length) {
+      // More missed days remain — show the next one in sequence
+      showBackfillGate();
+    } else {
+      // All missed days backfilled — proceed straight into today's form
+      openingStock = { ...closingStock };
+      document.getElementById('backfillBanner').classList.add('hidden');
+      renderForms();
+      document.getElementById('mainContent').classList.remove('hidden');
+    }
+  } catch(e) {
+    document.getElementById('backfillError').textContent = 'Failed to submit. Check your connection and try again.';
+    document.getElementById('backfillError').classList.remove('hidden');
+    console.error(e);
+  }
 }
 
 function getThreshold(product, supplied) {

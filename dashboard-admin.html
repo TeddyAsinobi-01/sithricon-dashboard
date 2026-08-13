@@ -54,32 +54,11 @@
       <button class="btn small outline" onclick="markAllRead()">Mark all as read</button>
     </div>
 
-    <!-- Restock Summary Card -->
-    <div id="restockSummaryCard" class="card hidden" style="border:2px solid var(--yellow);">
-      <div class="flex-between" style="margin-bottom:10px;">
-        <h2 style="margin:0; color:#856404;">📋 Restock List</h2>
-        <span style="font-size:0.8rem; color:var(--gray);" id="restockDate"></span>
-      </div>
-      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">All locations currently below their restock threshold:</p>
-      <div id="restockListItems"></div>
-      <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
-        <button class="btn yellow" onclick="sendRestockToWhatsApp()">📲 Send to WhatsApp</button>
-        <button class="btn small outline" onclick="copyRestockList()">📋 Copy List</button>
-      </div>
-      <div style="margin-top:12px;">
-        <label>WhatsApp Number <span style="font-weight:400; color:var(--gray);">(with country code)</span></label>
-        <div class="flex">
-          <input type="tel" id="waNumberInline" placeholder="e.g. 2348012345678" style="margin-bottom:0;">
-          <button class="btn small yellow" onclick="saveWaNumber()">Save</button>
-        </div>
-        <div id="waNumSavedMsg" class="alert success hidden" style="margin-top:6px;">Number saved.</div>
-      </div>
-    </div>
-
     <!-- Notification sub-tabs -->
     <div class="tabs" style="margin-bottom:10px;">
       <div class="tab active" data-notif-tab="discrepancy">⚠️ Discrepancy <span id="discrepancyBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
-      <div class="tab" data-notif-tab="supply">📦 Supply <span id="supplyBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+      <div class="tab" data-notif-tab="supplyrequest">📋 Supply Request <span id="supplyRequestBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+      <div class="tab" data-notif-tab="supply">📦 Supply Issue <span id="supplyBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
       <div class="tab" data-notif-tab="expiry">🕒 Expiry <span id="expiryBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
     </div>
 
@@ -87,8 +66,43 @@
       <div class="empty-state" id="discrepancyEmpty">No discrepancy notifications.</div>
       <div id="discrepancyList"></div>
     </div>
+
+    <!-- Supply Request tab: daily restock list -->
+    <div id="notif-supplyrequest" class="notif-tab-content hidden">
+      <div id="restockSummaryCard" class="card hidden" style="border:2px solid var(--yellow);">
+        <div class="flex-between" style="margin-bottom:10px;">
+          <h2 style="margin:0; color:#856404;">📋 Restock List</h2>
+          <span style="font-size:0.8rem; color:var(--gray);" id="restockDate"></span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">Locations reporting low stock today:</p>
+        <div id="restockListItems"></div>
+        <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+          <button class="btn yellow" id="sendRestockBtn" onclick="sendRestockToWhatsApp()">📲 Send to WhatsApp</button>
+          <button class="btn small outline" onclick="copyRestockList()">📋 Copy List</button>
+        </div>
+        <div style="margin-top:12px;">
+          <label>WhatsApp Number <span style="font-weight:400; color:var(--gray);">(with country code)</span></label>
+          <div class="flex">
+            <input type="tel" id="waNumberInline" placeholder="e.g. 2348012345678" style="margin-bottom:0;">
+            <button class="btn small yellow" onclick="saveWaNumber()">Save</button>
+          </div>
+          <div id="waNumSavedMsg" class="alert success hidden" style="margin-top:6px;">Number saved.</div>
+        </div>
+      </div>
+      <div id="restockSentCard" class="card hidden" style="opacity:0.6; transition:opacity 0.4s;">
+        <div class="flex-between">
+          <h2 style="margin:0; color:var(--green-dark);">✅ Restock List Sent</h2>
+          <span style="font-size:0.8rem; color:var(--gray);" id="restockSentDate"></span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--gray); margin-top:8px;">
+          Today's restock list has been sent. A new list will build up as merchandisers submit their reports for tomorrow.
+        </p>
+      </div>
+      <div class="empty-state" id="restockEmpty">No restock requests yet today.</div>
+    </div>
+
     <div id="notif-supply" class="notif-tab-content hidden">
-      <div class="empty-state" id="supplyEmpty">No supply notifications.</div>
+      <div class="empty-state" id="supplyEmpty">No supply issue notifications.</div>
       <div id="supplyList"></div>
     </div>
     <div id="notif-expiry" class="notif-tab-content hidden">
@@ -230,6 +244,7 @@
       <div class="tab" data-subtab="spoilage">Spoilage & Loss</div>
       <div class="tab" data-subtab="discrepancy">Discrepancy Records</div>
       <div class="tab" data-subtab="attendance">Attendance</div>
+      <div class="tab" data-subtab="supplyneeded">Supply Needed</div>
     </div>
 
     <div id="subtab-sales" class="subtab-content">
@@ -368,6 +383,32 @@
         </div>
       </div>
     </div>
+
+    <div id="subtab-supplyneeded" class="subtab-content hidden">
+      <div class="card">
+        <h2>Filter</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div><label>From Date</label><input type="date" id="supplyNeededFromDate" style="margin-bottom:0;"></div>
+          <div><label>To Date</label><input type="date" id="supplyNeededToDate" style="margin-bottom:0;"></div>
+        </div>
+        <div class="flex" style="gap:8px;">
+          <button class="btn small" onclick="loadSupplyNeededRecords()">Load Records</button>
+          <button class="btn small yellow" onclick="exportSupplyNeededCSV()">⬇️ Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Locations That Needed Supply</h2>
+        <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">
+          A record is created each time a restock list is sent, showing which locations needed products that day.
+        </p>
+        <div style="overflow-x:auto;">
+          <table id="supplyNeededTable" style="min-width:700px; font-size:0.82rem;">
+            <thead><tr><th>Date</th><th>Location</th><th>Products Needed</th><th>Carried From Previous Day</th></tr></thead>
+            <tbody><tr><td colspan="4" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- SETTINGS TAB -->
@@ -458,6 +499,16 @@ document.querySelectorAll('.tab-content .tabs .tab').forEach(tab => {
     tab.classList.add('active');
     document.querySelectorAll('.subtab-content').forEach(c => c.classList.add('hidden'));
     document.getElementById(`subtab-${tab.dataset.subtab}`).classList.remove('hidden');
+
+    // Auto-load on first open (all locations by default)
+    if (tab.dataset.subtab === 'attendance' && !tab.dataset.loaded) {
+      tab.dataset.loaded = 'true';
+      loadAttendanceGaps();
+    }
+    if (tab.dataset.subtab === 'supplyneeded' && !tab.dataset.loaded) {
+      tab.dataset.loaded = 'true';
+      loadSupplyNeededRecords();
+    }
   });
 });
 
@@ -597,12 +648,16 @@ function setupRealtimeNotifications() {
             ${n.leakage ? `<div style="font-size:0.85rem; color:var(--red); margin-top:2px;">💧 Leakage: ${JSON.stringify(n.leakage)}</div>` : ''}
             <div class="notif-time">${time}</div>${markBtn}
           </div>`);
-      } else if (n.type === 'low_stock' || n.type === 'supply_disputed' || n.type === 'supply_cancelled') {
+      } else if (n.type === 'low_stock') {
+        // Feed the daily persisted restock list instead of rendering as a standalone notification item
+        if (n.lowStockItems) {
+          upsertTodayRestockList(n.locationId, n.locationName, n.lowStockItems);
+        }
+        // Still mark as read automatically since it's now represented in the restock list, not as a discrete notification
+        if (!n.read) db.collection('notifications').doc(doc.id).update({ read: true });
+      } else if (n.type === 'supply_disputed' || n.type === 'supply_cancelled') {
         let itemLines, title;
-        if (n.type === 'low_stock') {
-          itemLines = Object.entries(n.lowStockItems || {}).map(([p, d]) => `<li><strong>${p}</strong>: ${d.closing} units left (threshold ${d.threshold})</li>`).join('');
-          title = `📉 Low Stock — ${n.locationName}`;
-        } else if (n.type === 'supply_cancelled') {
+        if (n.type === 'supply_cancelled') {
           itemLines = Object.entries(n.items || {}).map(([p, q]) => `<li>${p}: ${q} units</li>`).join('');
           title = `❌ Supplier Reported Issue — ${n.locationName}`;
         } else {
@@ -658,8 +713,6 @@ function setupRealtimeNotifications() {
     setBadge('discrepancyBadge', discrepancyItems.filter(i => !i.includes('read')).length);
     setBadge('supplyBadge', supplyItems.filter(i => !i.includes('read')).length);
     setBadge('expiryBadge', expiryItems.filter(i => !i.includes('read')).length);
-
-    buildRestockList();
 
     const countEl = document.getElementById('notifCount');
     const dotEl = document.getElementById('notifTabDot');
@@ -734,31 +787,127 @@ async function markAllRead() {
 function markNotifsSeen() { markAllRead(); }
 
 // ===== RESTOCK LIST (based on live currentStock vs thresholds) =====
-function buildRestockList() {
-  const lowLocations = allLocations.map(loc => {
-    const current = loc.currentStock || loc.products || {};
-    const items = Object.entries(current).filter(([p, qty]) => qty <= getThreshold(loc, p))
-      .map(([p, qty]) => ({ product: p, closing: qty, threshold: getThreshold(loc, p), supplied: (loc.products||{})[p] || qty }));
-    return { locationName: loc.name, items };
-  }).filter(l => l.items.length > 0);
+// ===== DAILY RESTOCK LIST (event-driven, persisted per date) =====
+// Triggered whenever a low_stock notification comes in (i.e. a merchandiser submitted a report with low stock)
+async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
+  const today = todayStr();
+  const listRef = db.collection('restockLists').doc(today);
+  const listSnap = await listRef.get();
 
-  const card = document.getElementById('restockSummaryCard');
+  const items = Object.fromEntries(
+    Object.entries(lowStockItems).map(([p, d]) => [p, { closing: d.closing, threshold: d.threshold }])
+  );
+
+  if (!listSnap.exists) {
+    // First low-stock report of the day — check yesterday's list for unsupplied carry-overs
+    const carriedLocations = await getCarriedOverLocations(today);
+    const locations = [...carriedLocations];
+    const existingIdx = locations.findIndex(l => l.locationId === locationId);
+    if (existingIdx >= 0) {
+      locations[existingIdx] = { locationId, locationName, items, carriedFromYesterday: locations[existingIdx].carriedFromYesterday };
+    } else {
+      locations.push({ locationId, locationName, items, carriedFromYesterday: false });
+    }
+    await listRef.set({
+      date: today, locations, status: 'pending',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else {
+    const data = listSnap.data();
+    const locations = data.locations || [];
+    const idx = locations.findIndex(l => l.locationId === locationId);
+    if (idx >= 0) {
+      locations[idx] = { locationId, locationName, items, carriedFromYesterday: locations[idx].carriedFromYesterday || false };
+    } else {
+      locations.push({ locationId, locationName, items, carriedFromYesterday: false });
+    }
+    await listRef.update({ locations });
+  }
+}
+
+// Find locations from yesterday's list that were never resupplied (their currentStock is still <= threshold)
+async function getCarriedOverLocations(todayDateStr) {
+  const yesterday = todayStr(new Date(new Date(todayDateStr).getTime() - 86400000));
+  const yestSnap = await db.collection('restockLists').doc(yesterday).get();
+  if (!yestSnap.exists) return [];
+
+  const yestData = yestSnap.data();
+  const carried = [];
+  for (const loc of (yestData.locations || [])) {
+    const locDoc = await db.collection('locations').doc(loc.locationId).get();
+    if (!locDoc.exists) continue;
+    const locData = locDoc.data();
+    const current = locData.currentStock || locData.products || {};
+
+    // Check if still below threshold for any of the flagged products
+    const stillLow = Object.entries(loc.items || {}).filter(([p]) => {
+      const qty = current[p];
+      return qty != null && qty <= getThreshold(locData, p);
+    });
+
+    if (stillLow.length > 0) {
+      const items = Object.fromEntries(stillLow.map(([p]) => [p, { closing: current[p], threshold: getThreshold(locData, p) }]));
+      carried.push({ locationId: loc.locationId, locationName: loc.locationName, items, carriedFromYesterday: true });
+    }
+  }
+  return carried;
+}
+
+let currentRestockListDoc = null;
+
+function watchTodayRestockList() {
+  const today = todayStr();
+  db.collection('restockLists').doc(today).onSnapshot(doc => {
+    currentRestockListDoc = doc.exists ? { id: doc.id, ...doc.data() } : null;
+    renderRestockCard();
+  });
+}
+
+function renderRestockCard() {
+  const pendingCard = document.getElementById('restockSummaryCard');
+  const sentCard = document.getElementById('restockSentCard');
+  const emptyEl = document.getElementById('restockEmpty');
   const listEl = document.getElementById('restockListItems');
   const dateEl = document.getElementById('restockDate');
+  const badgeEl = document.getElementById('supplyRequestBadge');
 
-  if (lowLocations.length === 0) { card.classList.add('hidden'); return; }
+  if (!currentRestockListDoc || !currentRestockListDoc.locations || currentRestockListDoc.locations.length === 0) {
+    pendingCard.classList.add('hidden');
+    sentCard.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+    if (badgeEl) badgeEl.classList.add('hidden');
+    return;
+  }
 
-  card.classList.remove('hidden');
+  emptyEl.classList.add('hidden');
+
+  if (currentRestockListDoc.status === 'sent') {
+    pendingCard.classList.add('hidden');
+    sentCard.classList.remove('hidden');
+    document.getElementById('restockSentDate').textContent = 'as of ' + new Date().toLocaleDateString('en-GB');
+    if (badgeEl) badgeEl.classList.add('hidden');
+    return;
+  }
+
+  if (badgeEl) {
+    badgeEl.textContent = currentRestockListDoc.locations.length;
+    badgeEl.classList.remove('hidden');
+  }
+
+  sentCard.classList.add('hidden');
+  pendingCard.classList.remove('hidden');
   dateEl.textContent = 'as of ' + new Date().toLocaleDateString('en-GB');
-  window.currentRestockData = lowLocations;
 
-  listEl.innerHTML = lowLocations.map(loc => `
+  listEl.innerHTML = currentRestockListDoc.locations.map(loc => `
     <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--light-gray);">
-      <div style="font-weight:700; color:var(--green-dark); margin-bottom:4px;">📍 ${loc.locationName}</div>
-      ${loc.items.map(item => `
+      <div style="font-weight:700; color:var(--green-dark); margin-bottom:4px;">
+        📍 ${loc.locationName}
+        ${loc.carriedFromYesterday ? '<span class="badge red" style="font-size:0.7rem; margin-left:6px;">Not supplied yesterday</span>' : ''}
+      </div>
+      ${Object.entries(loc.items || {}).map(([product, d]) => `
         <div style="display:flex; justify-content:space-between; font-size:0.9rem; padding:3px 0;">
-          <span>${item.product}</span>
-          <span style="color:var(--red); font-weight:600;">${item.closing} left (threshold ${item.threshold})</span>
+          <span>${product}</span>
+          <span style="color:var(--red); font-weight:600;">${d.closing} left (threshold ${d.threshold})</span>
         </div>`).join('')}
     </div>`).join('');
 
@@ -770,9 +919,11 @@ function buildRestockList() {
 function buildRestockText() {
   const date = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
   let text = `*ITHRI FRESH JUICE — RESTOCK REQUEST*\n📅 ${date}\n\n`;
-  (window.currentRestockData || []).forEach(loc => {
-    text += `📍 *${loc.locationName}*\n`;
-    loc.items.forEach(item => { text += `  • ${item.product}: ${item.closing} units remaining (threshold ${item.threshold})\n`; });
+  (currentRestockListDoc?.locations || []).forEach(loc => {
+    text += `📍 *${loc.locationName}*${loc.carriedFromYesterday ? ' (not supplied yesterday)' : ''}\n`;
+    Object.entries(loc.items || {}).forEach(([product, d]) => {
+      text += `  • ${product}: ${d.closing} units remaining (threshold ${d.threshold})\n`;
+    });
     text += '\n';
   });
   text += '_Please arrange restock for the above locations._';
@@ -782,7 +933,30 @@ function buildRestockText() {
 async function sendRestockToWhatsApp() {
   let number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
   if (!number) { alert('Please enter a WhatsApp number first.'); return; }
+  if (!currentRestockListDoc || !currentRestockListDoc.locations?.length) { alert('No restock list to send.'); return; }
+
   window.open(`https://wa.me/${number}?text=${encodeURIComponent(buildRestockText())}`, '_blank');
+
+  // Mark today's list as sent (fades the card) and write permanent Supply Needed record
+  const today = todayStr();
+  await db.collection('restockLists').doc(today).update({
+    status: 'sent', sentAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
+  // Permanent historical record for Reports & History → Supply Needed
+  const batch = db.batch();
+  currentRestockListDoc.locations.forEach(loc => {
+    const recRef = db.collection('supplyNeededRecords').doc();
+    batch.set(recRef, {
+      date: today,
+      locationId: loc.locationId,
+      locationName: loc.locationName,
+      items: loc.items,
+      carriedFromYesterday: !!loc.carriedFromYesterday,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  });
+  await batch.commit();
 }
 async function copyRestockList() {
   try { await navigator.clipboard.writeText(buildRestockText()); alert('Restock list copied!'); }
@@ -1158,7 +1332,7 @@ function setDefaultDateFilters() {
   const today = new Date();
   const prior = new Date(today); prior.setDate(prior.getDate() - 30);
   const fmt = d => d.toISOString().split('T')[0];
-  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate','discrepancyFromDate','discrepancyToDate','attendanceFromDate','attendanceToDate'].forEach(id => {
+  ['salesFromDate','salesToDate','supplyFromDate','supplyToDate','absenceFromDate','absenceToDate','spoilageFromDate','spoilageToDate','discrepancyFromDate','discrepancyToDate','attendanceFromDate','attendanceToDate','supplyNeededFromDate','supplyNeededToDate'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el.value) el.value = id.includes('From') ? fmt(prior) : fmt(today);
   });
@@ -1221,6 +1395,7 @@ async function loadReports() {
     const products = d.soldQty ? Object.keys(d.soldQty) : [];
     const lowText = d.hasLowStock ? '⚠️ Yes' : 'No';
     const lowColor = d.hasLowStock ? 'var(--red)' : 'inherit';
+    const backfillTag = d.backfilled ? ` <span class="badge" style="background:#1565C0; color:#fff; font-size:0.68rem;">Backfilled</span>` : '';
 
     if (products.length === 0) {
       rows.push(`<tr>
@@ -1228,9 +1403,9 @@ async function loadReports() {
         <td>${d.clockIn||'-'}</td><td>${d.clockOut||'-'}</td>
         <td colspan="4" style="color:var(--gray);">No report</td>
         <td style="color:${lowColor};">${lowText}</td>
-        <td style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+        <td style="color:${statusColor};font-weight:700;">${statusLabel}${backfillTag}</td>
         <td>-</td></tr>`);
-      adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:'' });
+      adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product:'', opening:'', sold:'', closing:'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel + (d.backfilled ? ' (Backfilled)' : ''), discrepancyReason:'' });
     } else {
       products.forEach((product, idx) => {
         const disc = d.discrepancy?.[product];
@@ -1246,7 +1421,7 @@ async function loadReports() {
           <td><strong>${d.soldQty[product]}</strong></td>
           <td>${d.closingStock?.[product]??'-'}</td>
           ${idx===0 ? `<td rowspan="${products.length}" style="color:${lowColor};">${lowText}</td>
-            <td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}</td>
+            <td rowspan="${products.length}" style="color:${statusColor};font-weight:700;">${statusLabel}${backfillTag}</td>
             <td rowspan="${products.length}">${d.discrepancyReason||'-'}</td>` : ''}
         </tr>`);
         adminSalesData.push({ date:d.date, location:loc.name, clockIn:d.clockIn||'', clockOut:d.clockOut||'', product, opening, sold:d.soldQty[product], closing:d.closingStock?.[product]??'', lowStock:d.hasLowStock?'Yes':'No', status:statusLabel, discrepancyReason:d.discrepancyReason||'' });
@@ -1685,11 +1860,54 @@ function exportAttendanceCSV() {
   a.click();
 }
 
+// ===== SUPPLY NEEDED RECORDS (permanent history, Feature 3) =====
+let supplyNeededData = [];
+
+async function loadSupplyNeededRecords() {
+  const fromDate = document.getElementById('supplyNeededFromDate').value;
+  const toDate = document.getElementById('supplyNeededToDate').value;
+  const tbody = document.querySelector('#supplyNeededTable tbody');
+  tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+  supplyNeededData = [];
+
+  let query = db.collection('supplyNeededRecords').orderBy('date', 'desc').limit(300);
+  const snap = await query.get();
+  const rows = [];
+
+  snap.forEach(doc => {
+    const d = doc.data();
+    if (fromDate && d.date < fromDate) return;
+    if (toDate && d.date > toDate) return;
+
+    const productsText = Object.entries(d.items || {}).map(([p, det]) => `${p}: ${det.closing} left`).join(', ');
+    rows.push(`<tr>
+      <td>${d.date}</td>
+      <td>${d.locationName}</td>
+      <td>${productsText || '-'}</td>
+      <td>${d.carriedFromYesterday ? '<span class="badge red">Yes</span>' : 'No'}</td>
+    </tr>`);
+    supplyNeededData.push({ date: d.date, location: d.locationName, products: productsText, carried: d.carriedFromYesterday ? 'Yes' : 'No' });
+  });
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="4" style="text-align:center; color:var(--gray);">No records found for selected filters.</td></tr>';
+}
+
+function exportSupplyNeededCSV() {
+  if (!supplyNeededData.length) { alert('Load records first.'); return; }
+  const headers = ['date','location','products','carried'];
+  const csv = [headers.join(','), ...supplyNeededData.map(r => headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `Ithri_SupplyNeeded_${todayStr()}.csv`;
+  a.click();
+}
+
 // ===== BOOT =====
 setupRealtimeOverview();
 setupRealtimeNotifications();
 setDefaultDateFilters();
 loadGlobalProducts();
+watchTodayRestockList();
 </script>
 </body>
 </html>
