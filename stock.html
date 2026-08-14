@@ -16,6 +16,12 @@
 
   <div id="loadingMsg" class="card"><p>Loading today's products...</p></div>
 
+  <!-- Permanent status card: greyed out / inactive when no reports are missing -->
+  <div id="backfillStatusCard" class="card hidden" style="opacity:0.55; border:2px dashed #ccc; cursor:not-allowed;">
+    <h3 style="color:var(--gray); margin-bottom:6px;">📅 Missed Report Check</h3>
+    <p style="font-size:0.85rem; color:var(--gray);">✅ All days accounted for. Nothing to submit here.</p>
+  </div>
+
   <!-- Mandatory backfill: any missed working day's report must be submitted before today's form -->
   <div id="backfillBanner" class="card hidden" style="border:2px solid #1565C0;">
     <h3 style="color:#0d47a1; margin-bottom:8px;">📅 Please Submit Your Missed Report First</h3>
@@ -170,24 +176,23 @@ async function init() {
       return;
     }
 
-    // Mandatory gate: scan backward through recent working days (skip off days) for any missed reports.
-    // Stops as soon as it finds a day that was already submitted, hits the feature's launch date floor,
-    // or after 14 days back (safety limit). Days before BACKFILL_FLOOR_DATE are never touched —
-    // they were already handled under the old process.
-    const BACKFILL_FLOOR_DATE = '2026-08-13'; // this feature's launch date — nothing before this is scanned
+    // Mandatory gate: from BACKFILL_FLOOR_DATE forward, EVERY calendar day needs a sales record —
+    // including off days. The store stays open on a merchandiser's off day (someone else sells),
+    // so off days are not exempt from reporting — they just aren't logged live by her on that day.
+    // Scans backward from yesterday and collects any day with no submitted report. Stops at the
+    // first day that WAS submitted (nothing missed before that point), or at the floor date,
+    // or after 14 days back (safety limit).
+    const BACKFILL_FLOOR_DATE = '2026-08-13'; // company rule change effective date — nothing before this is checked
     backfillQueue = [];
     for (let n = 1; n <= 14; n++) {
       const checkDate = dateStrMinusDays(n);
-      if (checkDate < BACKFILL_FLOOR_DATE) break; // never scan prior to launch day
-
-      const wasOffDay = locationOffDays.includes(dayOfWeekFromDateStr(checkDate));
-      if (wasOffDay) continue; // off days never need a report — skip and keep scanning further back
+      if (checkDate < BACKFILL_FLOOR_DATE) break; // never scan prior to the rule change
 
       const checkLogDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(checkDate).get();
       const wasSubmitted = checkLogDoc.exists &&
         (checkLogDoc.data().status === 'submitted' || checkLogDoc.data().status === 'flagged');
 
-      if (wasSubmitted) break; // found a submitted working day — nothing missed beyond this point
+      if (wasSubmitted) break; // found a submitted day — nothing missed beyond this point
       backfillQueue.push(checkDate);
     }
 
@@ -197,9 +202,13 @@ async function init() {
       backfillOpeningStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
         ? locationData.currentStock
         : suppliedStock;
+      document.getElementById('backfillStatusCard').classList.add('hidden');
       showBackfillGate();
       return;
     }
+
+    // Nothing missing — show the permanent status card in its greyed-out, inactive state
+    document.getElementById('backfillStatusCard').classList.remove('hidden');
 
     renderForms();
     document.getElementById('loadingMsg').classList.add('hidden');
