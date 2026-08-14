@@ -839,7 +839,7 @@ async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
   const listRef = db.collection('restockLists').doc(today);
   const listSnap = await listRef.get();
 
-  const items = Object.fromEntries(
+  const newItems = Object.fromEntries(
     Object.entries(lowStockItems).map(([p, d]) => [p, { closing: d.closing, threshold: d.threshold }])
   );
 
@@ -849,9 +849,14 @@ async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
     const locations = [...carriedLocations];
     const existingIdx = locations.findIndex(l => l.locationId === locationId);
     if (existingIdx >= 0) {
-      locations[existingIdx] = { locationId, locationName, items, carriedFromYesterday: locations[existingIdx].carriedFromYesterday };
+      // Merge: keep any still-low items carried from yesterday, layer today's freshly-reported items on top
+      locations[existingIdx] = {
+        locationId, locationName,
+        items: { ...locations[existingIdx].items, ...newItems },
+        carriedFromYesterday: locations[existingIdx].carriedFromYesterday
+      };
     } else {
-      locations.push({ locationId, locationName, items, carriedFromYesterday: false });
+      locations.push({ locationId, locationName, items: newItems, carriedFromYesterday: false });
     }
     await listRef.set({
       date: today, locations, status: 'pending',
@@ -862,9 +867,14 @@ async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
     const locations = data.locations || [];
     const idx = locations.findIndex(l => l.locationId === locationId);
     if (idx >= 0) {
-      locations[idx] = { locationId, locationName, items, carriedFromYesterday: locations[idx].carriedFromYesterday || false };
+      // Merge items instead of overwriting, so previously-flagged products aren't lost
+      locations[idx] = {
+        locationId, locationName,
+        items: { ...locations[idx].items, ...newItems },
+        carriedFromYesterday: locations[idx].carriedFromYesterday || false
+      };
     } else {
-      locations.push({ locationId, locationName, items, carriedFromYesterday: false });
+      locations.push({ locationId, locationName, items: newItems, carriedFromYesterday: false });
     }
     await listRef.update({ locations });
   }
@@ -872,7 +882,14 @@ async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
 
 // Find locations from yesterday's list that were never resupplied (their currentStock is still <= threshold)
 async function getCarriedOverLocations(todayDateStr) {
-  const yesterday = todayStr(new Date(new Date(todayDateStr).getTime() - 86400000));
+  // Use plain date-string arithmetic (avoids timezone parsing issues with `new Date("YYYY-MM-DD")`,
+  // which JS interprets as UTC midnight and can shift the "yesterday" calculation by a day
+  // depending on the browser's local timezone).
+  const [y, m, d] = todayDateStr.split('-').map(Number);
+  const todayLocal = new Date(y, m - 1, d, 12, 0, 0); // noon local time avoids DST edge cases
+  const yesterdayLocal = new Date(todayLocal.getTime() - 86400000);
+  const yesterday = todayStr(yesterdayLocal);
+
   const yestSnap = await db.collection('restockLists').doc(yesterday).get();
   if (!yestSnap.exists) return [];
 
@@ -947,7 +964,9 @@ function renderRestockCard() {
     <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--light-gray);">
       <div style="font-weight:700; color:var(--green-dark); margin-bottom:4px;">
         📍 ${loc.locationName}
-        ${loc.carriedFromYesterday ? '<span class="badge red" style="font-size:0.7rem; margin-left:6px;">Not supplied yesterday</span>' : ''}
+        ${loc.carriedFromYesterday
+          ? '<span class="badge red" style="font-size:0.7rem; margin-left:6px;">Not supplied yesterday</span>'
+          : '<span class="badge yellow" style="font-size:0.7rem; margin-left:6px;">Low today</span>'}
       </div>
       ${Object.entries(loc.items || {}).map(([product, d]) => `
         <div style="display:flex; justify-content:space-between; font-size:0.9rem; padding:3px 0;">
