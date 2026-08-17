@@ -59,6 +59,28 @@
 
     <button class="btn yellow" onclick="calculateAndSubmit()">Calculate & Submit</button>
 
+    <!-- Confirmation card: review before final send -->
+    <div id="confirmCard" class="card hidden" style="border:2px solid var(--green-main); margin-top:16px;">
+      <h2 style="color:var(--green-dark);">✅ Please Confirm Your Report</h2>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">Review what you entered below. If anything looks wrong, tap "Make Correction" to go back and fix it.</p>
+      <div id="confirmDetails" style="margin-bottom:12px;"></div>
+
+      <!-- Extra confirmation shown only when any product sold > 20 -->
+      <div id="highQtyConfirm" class="hidden alert warn" style="margin-bottom:12px;">
+        <strong>⚠️ Large sale detected.</strong> You reported more than 20 bottles sold for one or more products. Please double-check the figures below are correct.
+        <div id="highQtyList" style="margin-top:6px; font-size:0.9rem;"></div>
+        <label style="margin-top:10px;">
+          <input type="checkbox" id="highQtyAck" style="width:auto; margin-right:6px;" onchange="handleHighQtyAck()">
+          I confirm these large quantities are correct
+        </label>
+      </div>
+
+      <div class="flex" style="margin-top:10px;">
+        <button class="btn outline" onclick="makeCorrection()">✏️ Make Correction</button>
+        <button class="btn yellow" id="finalSendBtn" onclick="finalizeSend()" disabled>Send Report (10s)</button>
+      </div>
+    </div>
+
     <div id="discrepancyCard" class="card hidden" style="border:2px solid var(--red); margin-top:16px;">
       <h2 style="color:var(--red);">⚠️ Discrepancy Detected</h2>
       <div id="discrepancyDetails"></div>
@@ -66,21 +88,21 @@
       <label style="margin-top:12px;">Reason Type</label>
       <select id="discrepancyType" onchange="handleDiscrepancyTypeChange()" style="margin-bottom:10px;">
         <option value="">-- Select reason --</option>
-        <option value="spoilage">🔴 Spoilage (juice went bad)</option>
-        <option value="leakage">💧 Leakage (bottle leak / breakage)</option>
-        <option value="other">📝 Other reason</option>
+        <option value="expired">🕒 Expired products</option>
+        <option value="leaking">💧 Leaking products</option>
+        <option value="other">📝 Other</option>
       </select>
 
-      <!-- Spoilage inputs -->
-      <div id="spoilageInputs" class="hidden">
-        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:8px;">Enter number of bottles spoilt per product:</p>
-        <div id="spoilageProductInputs"></div>
+      <!-- Expired: forces the merchandiser down to the dedicated Expired card -->
+      <div id="expiredRedirect" class="hidden alert warn" style="margin-top:6px;">
+        Please scroll down and use the <strong>🕒 Report Expired Products</strong> card below to enter the number of expired bottles per product, then come back here to finish submitting.
+        <button class="btn small outline" style="margin-top:8px;" onclick="scrollToCard('expiredCard')">Go to Expired Products card</button>
       </div>
 
-      <!-- Leakage inputs -->
-      <div id="leakageInputs" class="hidden">
-        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:8px;">Enter number of bottles affected by leakage per product:</p>
-        <div id="leakageProductInputs"></div>
+      <!-- Leaking: forces the merchandiser down to the dedicated Leaking card -->
+      <div id="leakingRedirect" class="hidden alert warn" style="margin-top:6px;">
+        Please scroll down and use the <strong>💧 Report Leaking Products</strong> card below to enter the number of affected bottles per product, then come back here to finish submitting.
+        <button class="btn small outline" style="margin-top:8px;" onclick="scrollToCard('leakingCard')">Go to Leaking Products card</button>
       </div>
 
       <!-- Other reason -->
@@ -92,19 +114,35 @@
       <label style="margin-top:6px;">Additional notes (optional)</label>
       <textarea id="discrepancyNotes" rows="2" placeholder="Any extra details for the admin..."></textarea>
 
-      <button class="btn danger" onclick="submitWithReason()">Submit Explanation</button>
+      <button class="btn danger" id="submitDiscrepancyBtn" onclick="submitWithReason()">Submit Explanation</button>
+      <div id="discrepancyBlockedMsg" class="alert error hidden" style="margin-top:8px;"></div>
     </div>
 
-    <!-- Expiry reporting card -->
-    <div class="card" style="border:2px solid #795548; margin-top:16px;">
-      <h2 style="color:#795548;">🕒 Report Expired Products</h2>
-      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
-        If any products in your fridge have passed their expiry date, report them here.
-      </p>
-      <div id="expiryProductInputs"></div>
-      <button class="btn small outline" style="margin-bottom:10px;" onclick="addExpiryProductRow()">+ Add Product</button>
-      <button class="btn" style="background:#795548;" onclick="submitExpiryReport()">Submit Expiry Report</button>
-      <div id="expirySuccessMsg" class="alert success hidden" style="margin-top:8px;">✅ Expiry report submitted.</div>
+    <!-- Expired & Leaking cards side by side -->
+    <div class="flex" style="gap:16px; margin-top:16px; align-items:stretch; flex-wrap:wrap;">
+      <!-- Expired products card -->
+      <div id="expiredCard" class="card" style="border:2px solid #795548; flex:1; min-width:260px;">
+        <h2 style="color:#795548;">🕒 Report Expired Products</h2>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+          If any products in your fridge have passed their expiry date, report them here.
+        </p>
+        <div id="expiredProductInputs"></div>
+        <button class="btn small outline" style="margin-bottom:10px;" onclick="addExpiredProductRow()">+ Add Product</button>
+        <button class="btn" style="background:#795548;" onclick="confirmExpiredEntry()">Confirm Expired Entry</button>
+        <div id="expiredConfirmedMsg" class="alert success hidden" style="margin-top:8px;">✅ Expired quantities saved. Return to the discrepancy card above to submit.</div>
+      </div>
+
+      <!-- Leaking products card -->
+      <div id="leakingCard" class="card" style="border:2px solid #1565C0; flex:1; min-width:260px;">
+        <h2 style="color:#1565C0;">💧 Report Leaking Products</h2>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+          If any products leaked or broke, report the affected quantity here.
+        </p>
+        <div id="leakingProductInputs"></div>
+        <button class="btn small outline" style="margin-bottom:10px;" onclick="addLeakingProductRow()">+ Add Product</button>
+        <button class="btn" style="background:#1565C0;" onclick="confirmLeakingEntry()">Confirm Leaking Entry</button>
+        <div id="leakingConfirmedMsg" class="alert success hidden" style="margin-top:8px;">✅ Leaking quantities saved. Return to the discrepancy card above to submit.</div>
+      </div>
     </div>
 
     <div id="lowStockCard" class="card hidden" style="border:2px solid var(--yellow); margin-top:16px;">
@@ -336,6 +374,8 @@ function renderForms() {
 
 function sanitize(s) { return s.replace(/[^a-zA-Z0-9]/g, '_'); }
 
+let confirmTimerInterval = null;
+
 function calculateAndSubmit() {
   const closingStock = {}, soldQty = {}, discrepancies = {}, lowStockItems = {};
   let hasDiscrepancy = false;
@@ -372,8 +412,79 @@ function calculateAndSubmit() {
     }
   }
 
-  calculatedData = { closingStock, soldQty, discrepancies, lowStockItems };
+  calculatedData = { closingStock, soldQty, discrepancies, lowStockItems, hasDiscrepancy };
+  showConfirmCard();
+}
 
+function showConfirmCard() {
+  const { soldQty, closingStock } = calculatedData;
+  const detailsEl = document.getElementById('confirmDetails');
+  detailsEl.innerHTML = Object.keys(soldQty).map(p => `
+    <div class="flex-between" style="padding:6px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
+      <span>${p}</span>
+      <span>Sold: <strong>${soldQty[p]}</strong> &nbsp;|&nbsp; Closing: <strong>${closingStock[p]}</strong></span>
+    </div>`).join('');
+
+  // Feature 2: flag any product with sold quantity above 20
+  const highQtyProducts = Object.entries(soldQty).filter(([, qty]) => qty > 20);
+  const highQtyEl = document.getElementById('highQtyConfirm');
+  const highQtyAck = document.getElementById('highQtyAck');
+  highQtyAck.checked = false;
+
+  if (highQtyProducts.length > 0) {
+    document.getElementById('highQtyList').innerHTML = highQtyProducts.map(([p,q]) => `• ${p}: <strong>${q}</strong> bottles sold`).join('<br>');
+    highQtyEl.classList.remove('hidden');
+  } else {
+    highQtyEl.classList.add('hidden');
+  }
+
+  document.getElementById('confirmCard').classList.remove('hidden');
+  document.getElementById('confirmCard').scrollIntoView({ behavior: 'smooth' });
+  startConfirmTimer();
+}
+
+// 10-second delay before the send button becomes clickable — gives her time to actually read it
+function startConfirmTimer() {
+  const btn = document.getElementById('finalSendBtn');
+  const highQtyVisible = !document.getElementById('highQtyConfirm').classList.contains('hidden');
+  let secondsLeft = 10;
+  btn.disabled = true;
+  btn.textContent = `Send Report (${secondsLeft}s)`;
+
+  if (confirmTimerInterval) clearInterval(confirmTimerInterval);
+  confirmTimerInterval = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft <= 0) {
+      clearInterval(confirmTimerInterval);
+      btn.textContent = 'Send Report';
+      // Only enable now if there's no pending high-quantity acknowledgement required
+      btn.disabled = highQtyVisible && !document.getElementById('highQtyAck').checked;
+    } else {
+      btn.textContent = `Send Report (${secondsLeft}s)`;
+    }
+  }, 1000);
+}
+
+// Feature 2: extra acknowledgement required when any product sold > 20
+function handleHighQtyAck() {
+  const btn = document.getElementById('finalSendBtn');
+  const timerRunning = confirmTimerInterval !== null && btn.textContent.includes('(');
+  if (!timerRunning) {
+    btn.disabled = !document.getElementById('highQtyAck').checked;
+  }
+}
+
+function makeCorrection() {
+  if (confirmTimerInterval) { clearInterval(confirmTimerInterval); confirmTimerInterval = null; }
+  document.getElementById('confirmCard').classList.add('hidden');
+  document.getElementById('mainContent').scrollIntoView({ behavior: 'smooth' });
+}
+
+function finalizeSend() {
+  if (confirmTimerInterval) { clearInterval(confirmTimerInterval); confirmTimerInterval = null; }
+  document.getElementById('confirmCard').classList.add('hidden');
+
+  const { discrepancies, lowStockItems, hasDiscrepancy } = calculatedData;
   if (Object.keys(lowStockItems).length > 0) showLowStockWarning(lowStockItems);
   if (hasDiscrepancy) {
     showDiscrepancy(discrepancies);
@@ -407,71 +518,76 @@ function showDiscrepancy(discrepancies) {
         That's <strong>${Math.abs(d.diff)} unit(s) ${direction}</strong>.
       </div>`;
   }
-  // Populate spoilage and leakage product inputs
-  const products = Object.keys(discrepancies);
-  const spoilageEl = document.getElementById('spoilageProductInputs');
-  const leakageEl = document.getElementById('leakageProductInputs');
-  spoilageEl.innerHTML = '';
-  leakageEl.innerHTML = '';
-  products.forEach(p => {
-    const key = p.replace(/[^a-zA-Z0-9]/g, '_');
-    spoilageEl.innerHTML += `<label>${p} — bottles spoilt</label><input type="number" min="0" value="0" id="spoilage_${key}" placeholder="0">`;
-    leakageEl.innerHTML += `<label>${p} — bottles leaked/broken</label><input type="number" min="0" value="0" id="leakage_${key}" placeholder="0">`;
-  });
   document.getElementById('discrepancyCard').classList.remove('hidden');
   document.getElementById('discrepancyCard').scrollIntoView({ behavior: 'smooth' });
 }
 
+function scrollToCard(id) {
+  document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+}
+
+let expiredConfirmed = null; // {product: qty} once confirmed via the Expired card, else null
+let leakingConfirmed = null; // {product: qty} once confirmed via the Leaking card, else null
+
 function handleDiscrepancyTypeChange() {
   const type = document.getElementById('discrepancyType').value;
-  document.getElementById('spoilageInputs').classList.toggle('hidden', type !== 'spoilage');
-  document.getElementById('leakageInputs').classList.toggle('hidden', type !== 'leakage');
+  document.getElementById('expiredRedirect').classList.toggle('hidden', type !== 'expired');
+  document.getElementById('leakingRedirect').classList.toggle('hidden', type !== 'leaking');
   document.getElementById('otherReasonInput').classList.toggle('hidden', type !== 'other');
+  document.getElementById('discrepancyBlockedMsg').classList.add('hidden');
 }
 
 async function submitWithReason() {
   const type = document.getElementById('discrepancyType').value;
   if (!type) { alert('Please select a reason type.'); return; }
+
   let reason = '';
-  let spoilageData = null;
-  let leakageData = null;
-  if (type === 'spoilage') {
-    spoilageData = {};
-    Object.keys(calculatedData.discrepancies).forEach(p => {
-      const key = p.replace(/[^a-zA-Z0-9]/g, '_');
-      const val = parseFloat(document.getElementById('spoilage_' + key)?.value) || 0;
-      if (val > 0) spoilageData[p] = val;
-    });
-    reason = 'Spoilage: ' + Object.entries(spoilageData).map(([p,q]) => q + ' ' + p).join(', ');
-  } else if (type === 'leakage') {
-    leakageData = {};
-    Object.keys(calculatedData.discrepancies).forEach(p => {
-      const key = p.replace(/[^a-zA-Z0-9]/g, '_');
-      const val = parseFloat(document.getElementById('leakage_' + key)?.value) || 0;
-      if (val > 0) leakageData[p] = val;
-    });
-    reason = 'Leakage: ' + Object.entries(leakageData).map(([p,q]) => q + ' ' + p).join(', ');
+  let expiredData = null;
+  let leakingData = null;
+  const blockedMsg = document.getElementById('discrepancyBlockedMsg');
+  blockedMsg.classList.add('hidden');
+
+  if (type === 'expired') {
+    if (!expiredConfirmed || Object.keys(expiredConfirmed).length === 0) {
+      blockedMsg.textContent = '⚠️ Please confirm your expired product quantities in the card below before submitting.';
+      blockedMsg.classList.remove('hidden');
+      scrollToCard('expiredCard');
+      return;
+    }
+    expiredData = expiredConfirmed;
+    reason = 'Expired: ' + Object.entries(expiredData).map(([p,q]) => q + ' ' + p).join(', ');
+  } else if (type === 'leaking') {
+    if (!leakingConfirmed || Object.keys(leakingConfirmed).length === 0) {
+      blockedMsg.textContent = '⚠️ Please confirm your leaking product quantities in the card below before submitting.';
+      blockedMsg.classList.remove('hidden');
+      scrollToCard('leakingCard');
+      return;
+    }
+    leakingData = leakingConfirmed;
+    reason = 'Leaking: ' + Object.entries(leakingData).map(([p,q]) => q + ' ' + p).join(', ');
   } else {
     reason = document.getElementById('discrepancyReason').value.trim();
     if (!reason) { alert('Please provide a reason.'); return; }
   }
+
   const notes = document.getElementById('discrepancyNotes').value.trim();
   const fullReason = notes ? reason + ' | Notes: ' + notes : reason;
-  await saveLog('flagged', fullReason, spoilageData, leakageData);
-  await sendDiscrepancyNotification(fullReason, spoilageData, leakageData);
+
+  await saveLog('flagged', fullReason, expiredData, leakingData);
+  await sendDiscrepancyNotification(fullReason, expiredData, leakingData);
 }
 
-async function sendDiscrepancyNotification(reason, spoilage, leakage) {
+async function sendDiscrepancyNotification(reason, expired, leaking) {
   const payload = {
     type: 'discrepancy', locationId: session.locationId, locationName: session.locationName,
     date: today, reason, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
   };
-  if (spoilage) payload.spoilage = spoilage;
-  if (leakage) payload.leakage = leakage;
+  if (expired) payload.expiry = expired;
+  if (leaking) payload.leakage = leaking;
   await db.collection('notifications').add(payload);
 }
 
-async function saveLog(status, discrepancyReason, spoilageData, leakageData) {
+async function saveLog(status, discrepancyReason, expiredData, leakingData) {
   const { closingStock, soldQty, discrepancies, lowStockItems } = calculatedData;
   const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
   const locRef = db.collection('locations').doc(session.locationId);
@@ -482,8 +598,8 @@ async function saveLog(status, discrepancyReason, spoilageData, leakageData) {
     hasLowStock: Object.keys(lowStockItems).length > 0, status,
     submittedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
-  if (spoilageData) payload.spoilage = spoilageData;
-  if (leakageData) payload.leakage = leakageData;
+  if (expiredData) payload.expiry = expiredData;
+  if (leakingData) payload.leakage = leakingData;
   try {
     await logRef.set(payload, { merge: true });
     await locRef.update({ currentStock: closingStock });
@@ -518,9 +634,8 @@ async function shareLowStockWhatsApp() {
   window.open(url, '_blank');
 }
 
-// ===== EXPIRY REPORTING =====
-function addExpiryProductRow() {
-  const container = document.getElementById('expiryProductInputs');
+// ===== EXPIRED PRODUCTS CARD =====
+function buildProductRow(container) {
   const products = Object.keys(openingStock);
   if (products.length > 0) {
     container.innerHTML += `
@@ -541,31 +656,45 @@ function addExpiryProductRow() {
   }
 }
 
-async function submitExpiryReport() {
-  const rows = document.querySelectorAll('#expiryProductInputs .flex');
-  if (rows.length === 0) { alert('Please add at least one product.'); return; }
-  const expiryItems = {};
+function readProductRows(container) {
+  const rows = container.querySelectorAll('.flex');
+  const result = {};
   rows.forEach(row => {
     const sel = row.querySelector('select');
     const textInput = row.querySelector('input[type="text"]');
     const numInput = row.querySelector('input[type="number"]');
     const productName = sel ? sel.value : (textInput ? textInput.value.trim() : '');
     const qty = parseFloat(numInput?.value) || 0;
-    if (productName && qty > 0) expiryItems[productName] = qty;
+    if (productName && qty > 0) result[productName] = qty;
   });
-  if (Object.keys(expiryItems).length === 0) { alert('Please enter at least one quantity greater than 0.'); return; }
-  try {
-    await db.collection('notifications').add({
-      type: 'expiry', locationId: session.locationId, locationName: session.locationName,
-      date: today, expiryItems, read: false,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    document.getElementById('expirySuccessMsg').classList.remove('hidden');
-    document.getElementById('expiryProductInputs').innerHTML = '';
-  } catch(e) {
-    alert('Failed to submit expiry report. Check your connection.');
-    console.error(e);
-  }
+  return result;
+}
+
+function addExpiredProductRow() {
+  buildProductRow(document.getElementById('expiredProductInputs'));
+}
+
+function confirmExpiredEntry() {
+  const container = document.getElementById('expiredProductInputs');
+  const items = readProductRows(container);
+  if (Object.keys(items).length === 0) { alert('Please enter at least one quantity greater than 0.'); return; }
+  expiredConfirmed = items;
+  document.getElementById('expiredConfirmedMsg').classList.remove('hidden');
+  document.getElementById('discrepancyBlockedMsg').classList.add('hidden');
+}
+
+// ===== LEAKING PRODUCTS CARD =====
+function addLeakingProductRow() {
+  buildProductRow(document.getElementById('leakingProductInputs'));
+}
+
+function confirmLeakingEntry() {
+  const container = document.getElementById('leakingProductInputs');
+  const items = readProductRows(container);
+  if (Object.keys(items).length === 0) { alert('Please enter at least one quantity greater than 0.'); return; }
+  leakingConfirmed = items;
+  document.getElementById('leakingConfirmedMsg').classList.remove('hidden');
+  document.getElementById('discrepancyBlockedMsg').classList.add('hidden');
 }
 
 init();
