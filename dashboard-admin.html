@@ -694,12 +694,13 @@ function setupRealtimeNotifications() {
             <div class="notif-time">${time}</div>${markBtn}
           </div>`);
       } else if (n.type === 'low_stock') {
-        // Feed the daily persisted restock list instead of rendering as a standalone notification item
+        // Feed the daily persisted restock list. Queued (not fired-and-forgotten) so concurrent
+        // low_stock notifications from multiple locations never race on the same restockLists doc.
         if (n.lowStockItems) {
-          upsertTodayRestockList(n.locationId, n.locationName, n.lowStockItems);
+          queueRestockUpdate(() => upsertTodayRestockList(n.locationId, n.locationName, n.lowStockItems));
         }
         // Still mark as read automatically since it's now represented in the restock list, not as a discrete notification
-        if (!n.read) db.collection('notifications').doc(doc.id).update({ read: true });
+        if (!n.read) db.collection('notifications').doc(doc.id).update({ read: true }).catch(() => {});
       } else if (n.type === 'supply_disputed' || n.type === 'supply_cancelled') {
         let itemLines, title;
         if (n.type === 'supply_cancelled') {
@@ -834,6 +835,15 @@ function markNotifsSeen() { markAllRead(); }
 // ===== RESTOCK LIST (based on live currentStock vs thresholds) =====
 // ===== DAILY RESTOCK LIST (event-driven, persisted per date) =====
 // Triggered whenever a low_stock notification comes in (i.e. a merchandiser submitted a report with low stock)
+// Serializes restock list writes so concurrent low_stock notifications (e.g. several
+// merchandisers submitting around the same time) never read-modify-write the same
+// restockLists/{date} document at once and silently overwrite each other.
+let restockUpdateChain = Promise.resolve();
+function queueRestockUpdate(fn) {
+  restockUpdateChain = restockUpdateChain.then(fn).catch(err => console.error('Restock update failed:', err));
+  return restockUpdateChain;
+}
+
 async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
   const today = todayStr();
   const listRef = db.collection('restockLists').doc(today);
@@ -843,6 +853,8 @@ async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
     Object.entries(lowStockItems).map(([p, d]) => [p, { closing: d.closing, threshold: d.threshold }])
   );
 
+  let carriedFlag = false;
+
   if (!listSnap.exists) {
     // First low-stock report of the day — check yesterday's list for unsupplied carry-overs
     const carriedLocations = await getCarriedOverLocations(today);
@@ -850,10 +862,11 @@ async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
     const existingIdx = locations.findIndex(l => l.locationId === locationId);
     if (existingIdx >= 0) {
       // Merge: keep any still-low items carried from yesterday, layer today's freshly-reported items on top
+      carriedFlag = locations[existingIdx].carriedFromYesterday;
       locations[existingIdx] = {
         locationId, locationName,
         items: { ...locations[existingIdx].items, ...newItems },
-        carriedFromYesterday: locations[existingIdx].carriedFromYesterday
+        carriedFromYesterday: carriedFlag
       };
     } else {
       locations.push({ locationId, locationName, items: newItems, carriedFromYesterday: false });
@@ -868,15 +881,42 @@ async function upsertTodayRestockList(locationId, locationName, lowStockItems) {
     const idx = locations.findIndex(l => l.locationId === locationId);
     if (idx >= 0) {
       // Merge items instead of overwriting, so previously-flagged products aren't lost
+      carriedFlag = locations[idx].carriedFromYesterday || false;
       locations[idx] = {
         locationId, locationName,
         items: { ...locations[idx].items, ...newItems },
-        carriedFromYesterday: locations[idx].carriedFromYesterday || false
+        carriedFromYesterday: carriedFlag
       };
     } else {
       locations.push({ locationId, locationName, items: newItems, carriedFromYesterday: false });
     }
     await listRef.update({ locations });
+  }
+
+  // Write/refresh the permanent historical record immediately — Reports & History → Supply Needed
+  // should reflect low-stock locations as they're reported, not only once WhatsApp is sent.
+  await upsertSupplyNeededRecord(today, locationId, locationName, newItems, carriedFlag);
+}
+
+// Keeps one supplyNeededRecords entry per location per day, updating it in place as
+// new low-stock items come in for that location throughout the day.
+async function upsertSupplyNeededRecord(date, locationId, locationName, items, carriedFromYesterday) {
+  const recordId = `${date}_${locationId}`;
+  const recRef = db.collection('supplyNeededRecords').doc(recordId);
+  const recSnap = await recRef.get();
+
+  if (recSnap.exists) {
+    const existing = recSnap.data();
+    await recRef.update({
+      items: { ...existing.items, ...items },
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else {
+    await recRef.set({
+      date, locationId, locationName, items,
+      carriedFromYesterday: !!carriedFromYesterday,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
   }
 }
 
@@ -1001,26 +1041,12 @@ async function sendRestockToWhatsApp() {
 
   window.open(`https://wa.me/${number}?text=${encodeURIComponent(buildRestockText())}`, '_blank');
 
-  // Mark today's list as sent (fades the card) and write permanent Supply Needed record
+  // Mark today's list as sent (fades the card). The supplyNeededRecords history was already
+  // written incrementally as each low-stock report came in — no need to write it again here.
   const today = todayStr();
   await db.collection('restockLists').doc(today).update({
     status: 'sent', sentAt: firebase.firestore.FieldValue.serverTimestamp()
   });
-
-  // Permanent historical record for Reports & History → Supply Needed
-  const batch = db.batch();
-  currentRestockListDoc.locations.forEach(loc => {
-    const recRef = db.collection('supplyNeededRecords').doc();
-    batch.set(recRef, {
-      date: today,
-      locationId: loc.locationId,
-      locationName: loc.locationName,
-      items: loc.items,
-      carriedFromYesterday: !!loc.carriedFromYesterday,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  });
-  await batch.commit();
 }
 async function copyRestockList() {
   try { await navigator.clipboard.writeText(buildRestockText()); alert('Restock list copied!'); }
