@@ -246,6 +246,7 @@
       <div class="tab" data-subtab="attendance">Attendance</div>
       <div class="tab" data-subtab="supplyneeded">Supply Needed</div>
       <div class="tab" data-subtab="stockadjustments">Stock Adjustments</div>
+      <div class="tab" data-subtab="backfillaudit">Backfill Audit</div>
     </div>
 
     <div id="subtab-sales" class="subtab-content">
@@ -408,6 +409,17 @@
             <tbody><tr><td colspan="4" style="text-align:center; color:var(--gray);">Set filters and click "Load Records".</td></tr></tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <div id="subtab-backfillaudit" class="subtab-content hidden">
+      <div class="card">
+        <h2>🔍 Backfill Audit</h2>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">
+          Checks every missed-day (backfilled) report against the stock that was really in the fridge on that day,
+          and flags any sales above it.
+        </p>
+        <a href="backfill-audit.html" style="text-decoration:none;"><button class="btn yellow">Open Backfill Audit</button></a>
       </div>
     </div>
 

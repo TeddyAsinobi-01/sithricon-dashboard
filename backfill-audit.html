@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri Admin - Backfill Audit</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .audit-wrap { overflow-x:auto; }
+  .audit-table { width:100%; border-collapse:collapse; min-width:820px; font-size:0.84rem; }
+  .audit-table th { text-align:left; background:var(--green-dark, #1b5e20); color:#fff; padding:8px 10px; white-space:nowrap; }
+  .audit-table td { padding:7px 10px; border-bottom:1px solid #e3e3e3; vertical-align:top; }
+  .audit-table tr.flag td { background:#fde2e2; }
+  .audit-table tr.unverified td { background:#f4f4f4; color:#777; }
+  .stat-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:14px; }
+  .stat { background:#fff; border-radius:var(--radius, 10px); padding:12px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+  .stat .n { font-size:1.5rem; font-weight:800; color:var(--green-dark, #1b5e20); }
+  .stat .n.bad { color:var(--red, #c62828); }
+  .stat .l { font-size:0.75rem; color:var(--gray, #666); }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <h1><span class="logo-mark">Ithri</span> Backfill Audit</h1>
+  <span style="font-size:0.85rem; cursor:pointer;" onclick="window.location.href='dashboard-admin.html'">← Dashboard</span>
+</header>
+
+<div class="container">
+  <div id="authMsg" class="alert error hidden">
+    You are not logged in as admin. <a href="dashboard-admin.html">Open the admin dashboard</a> and log in first, then come back to this page.
+  </div>
+
+  <div id="auditUI">
+    <div class="card">
+      <h2>🔍 Backfill Audit</h2>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">
+        Re-checks every <strong>backfilled</strong> (missed-day) report. For each one it works out what was really in the fridge that day —
+        the merchandiser's last live report plus supplies and stock corrections up to that day — and compares it with the sales she reported.
+        Anything sold above that amount is flagged. Reports made before the new cap rule will show up here if they over-reported.
+      </p>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+        <div><label>Location</label><select id="auditLocation" style="margin-bottom:0;"><option value="">All locations</option></select></div>
+        <div><label>Missed day from</label><input type="date" id="auditFrom" style="margin-bottom:0;"></div>
+        <div><label>Missed day to</label><input type="date" id="auditTo" style="margin-bottom:0;"></div>
+      </div>
+      <label style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">
+        <input type="checkbox" id="auditFlaggedOnly" style="width:auto;" onchange="renderAudit()"> Show only over-reported days
+      </label>
+      <div class="flex">
+        <button class="btn yellow" id="auditRunBtn" onclick="runAudit()">Run Audit</button>
+        <button class="btn outline" onclick="exportAuditCSV()">Export CSV</button>
+      </div>
+    </div>
+
+    <div id="auditStatus" style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;"></div>
+    <div id="auditSummary"></div>
+    <div id="auditTableBox"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script>
+if (sessionStorage.getItem('ithri_admin_auth') !== 'true') {
+  document.getElementById('authMsg').classList.remove('hidden');
+  document.getElementById('auditUI').classList.add('hidden');
+}
+
+let auditRows = [];      // one entry per location/day/product
+let auditDayList = [];   // one entry per location/day
+let allAuditLocations = [];
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+function eventDateStr(ms) { return todayStr(new Date(ms)); }
+function endOfDateMs(dateStr) { return Date.parse(dateStr + 'T23:59:59.999Z'); }
+function shiftDate(dateStr, days) { return todayStr(new Date(Date.parse(dateStr + 'T12:00:00Z') + days * 86400000)); }
+
+function setDefaults() {
+  const t = todayStr();
+  document.getElementById('auditTo').value = t;
+  document.getElementById('auditFrom').value = shiftDate(t, -30);
+}
+
+async function loadLocationsList() {
+  const snap = await db.collection('locations').get();
+  allAuditLocations = [];
+  snap.forEach(doc => allAuditLocations.push({ id: doc.id, name: doc.data().name || doc.id }));
+  allAuditLocations.sort((a, b) => a.name.localeCompare(b.name));
+  const sel = document.getElementById('auditLocation');
+  allAuditLocations.forEach(l => { sel.innerHTML += `<option value="${esc(l.id)}">${esc(l.name)}</option>`; });
+}
+
+// Same event model the merchandiser page uses: confirmed supplies (supplier tap date, or admin-add date)
+// and admin stock corrections. Direct adds are already inside confirmed supplies, so they are not read twice.
+async function loadEvents(locId) {
+  const events = [];
+  const supSnap = await db.collection('supplyRequests').where('locationId', '==', locId).where('status', '==', 'confirmed').get();
+  supSnap.forEach(doc => {
+    const d = doc.data();
+    const t = d.confirmedAt || d.createdAt;
+    if (!t || !t.toMillis || !d.items) return;
+    const delta = {};
+    for (const [p, q] of Object.entries(d.items)) { const n = Number(q) || 0; if (n) delta[p] = n; }
+    if (Object.keys(delta).length) events.push({ ts: t.toMillis(), delta });
+  });
+  const adjSnap = await db.collection('stockAdjustments').where('locationId', '==', locId).get();
+  adjSnap.forEach(doc => {
+    const d = doc.data();
+    if (d.type !== 'correction' || !d.createdAt || !d.createdAt.toMillis) return;
+    const delta = {};
+    const prods = new Set([...Object.keys(d.previousStock || {}), ...Object.keys(d.newStock || {})]);
+    prods.forEach(p => {
+      const diff = (Number(d.newStock && d.newStock[p]) || 0) - (Number(d.previousStock && d.previousStock[p]) || 0);
+      if (diff) delta[p] = diff;
+    });
+    if (Object.keys(delta).length) events.push({ ts: d.createdAt.toMillis(), delta });
+  });
+  events.sort((a, b) => a.ts - b.ts);
+  return events;
+}
+
+function cutoffMs(log) {
+  if (!log.backfilled && log.submittedAt && log.submittedAt.toMillis) return log.submittedAt.toMillis();
+  return endOfDateMs(log.date);
+}
+
+async function auditLocation(loc, from, to) {
+  const days = [];
+  const rows = [];
+
+  // Pull logs from 45 days before the window so there is a real report to anchor on
+  const logSnap = await db.collection('locations').doc(loc.id).collection('logs')
+    .where('date', '>=', shiftDate(from, -45)).where('date', '<=', to).get();
+  const logs = [];
+  logSnap.forEach(doc => logs.push(doc.data()));
+  logs.sort((a, b) => a.date < b.date ? -1 : 1);
+  if (!logs.some(l => l.backfilled && l.date >= from && l.date <= to)) return { days, rows };
+
+  const events = await loadEvents(loc.id);
+  let running = null;      // stock after the last report that was replayed
+  let pending = [];        // events not yet counted
+
+  for (const log of logs) {
+    if (log.status !== 'submitted' && log.status !== 'flagged') continue;
+
+    if (!log.backfilled) {
+      // A live report is a real physical count — it re-anchors everything
+      running = { ...(log.closingStock || {}) };
+      const c = cutoffMs(log);
+      pending = events.filter(e => e.ts > c);
+      continue;
+    }
+
+    const inWindow = log.date >= from && log.date <= to;
+    const sold = log.soldQty || {};
+    const backfilledOn = log.backfilledOn || (log.submittedAt && log.submittedAt.toMillis ? eventDateStr(log.submittedAt.toMillis()) : '');
+
+    if (running === null) {
+      if (inWindow) days.push({ loc: loc.name, date: log.date, backfilledOn, state: 'unverified', excess: 0 });
+      continue;
+    }
+
+    const received = {};
+    const later = [];
+    for (const e of pending) {
+      if (eventDateStr(e.ts) <= log.date) { for (const [p, q] of Object.entries(e.delta)) received[p] = (received[p] || 0) + q; }
+      else later.push(e);
+    }
+    pending = later;
+
+    // Supplies that landed AFTER the missed day but BEFORE the report was filled in — the loophole amount
+    const lateSupply = {};
+    for (const e of later) {
+      const ed = eventDateStr(e.ts);
+      if (backfilledOn && ed > log.date && ed <= backfilledOn) {
+        for (const [p, q] of Object.entries(e.delta)) if (q > 0) lateSupply[p] = (lateSupply[p] || 0) + q;
+      }
+    }
+
+    const products = Array.from(new Set([...Object.keys(running), ...Object.keys(received), ...Object.keys(sold)]));
+    const available = {};
+    const after = {};
+    let dayExcess = 0;
+    products.forEach(p => {
+      available[p] = Math.max(0, (running[p] || 0) + (received[p] || 0));
+      const s = Number(sold[p]) || 0;
+      const excess = Math.max(0, s - available[p]);
+      dayExcess += excess;
+      after[p] = Math.max(0, available[p] - s);
+      if (inWindow && (s > 0 || available[p] > 0)) {
+        rows.push({ loc: loc.name, date: log.date, backfilledOn, product: p, available: available[p], sold: s, excess,
+                    lateSupply: lateSupply[p] || 0, state: excess > 0 ? 'flag' : 'ok' });
+      }
+    });
+    running = after;
+
+    if (inWindow) {
+      days.push({ loc: loc.name, date: log.date, backfilledOn, state: dayExcess > 0 ? 'flag' : 'ok', excess: dayExcess });
+      if (!rows.some(r => r.loc === loc.name && r.date === log.date)) {
+        rows.push({ loc: loc.name, date: log.date, backfilledOn, product: '— nothing in fridge, no sales —', available: 0, sold: 0, excess: 0, lateSupply: 0, state: 'ok' });
+      }
+    }
+  }
+  return { days, rows };
+}
+
+async function runAudit() {
+  const btn = document.getElementById('auditRunBtn');
+  const status = document.getElementById('auditStatus');
+  const from = document.getElementById('auditFrom').value;
+  const to = document.getElementById('auditTo').value;
+  const locId = document.getElementById('auditLocation').value;
+  if (!from || !to) { alert('Pick a from and to date.'); return; }
+
+  btn.disabled = true;
+  auditRows = []; auditDayList = [];
+  document.getElementById('auditSummary').innerHTML = '';
+  document.getElementById('auditTableBox').innerHTML = '';
+
+  try {
+    const targets = locId ? allAuditLocations.filter(l => l.id === locId) : allAuditLocations;
+    let done = 0;
+    for (const loc of targets) {
+      status.textContent = `Checking ${loc.name} (${++done} of ${targets.length})...`;
+      const r = await auditLocation(loc, from, to);
+      auditRows.push(...r.rows);
+      auditDayList.push(...r.days);
+    }
+    status.textContent = `Done. Checked ${targets.length} location(s).`;
+    renderAudit();
+  } catch (e) {
+    console.error(e);
+    status.textContent = '';
+    document.getElementById('auditTableBox').innerHTML = '<div class="alert error">Could not run the audit. Check your connection and try again.</div>';
+  }
+  btn.disabled = false;
+}
+
+function renderAudit() {
+  const summaryEl = document.getElementById('auditSummary');
+  const boxEl = document.getElementById('auditTableBox');
+  if (!auditDayList.length && !auditRows.length) {
+    if (document.getElementById('auditStatus').textContent.startsWith('Done')) {
+      summaryEl.innerHTML = '';
+      boxEl.innerHTML = '<div class="card"><div class="empty-state">No backfilled reports found for this period.</div></div>';
+    }
+    return;
+  }
+
+  const flaggedDays = auditDayList.filter(d => d.state === 'flag').length;
+  const unverified = auditDayList.filter(d => d.state === 'unverified').length;
+  const totalExcess = auditDayList.reduce((n, d) => n + d.excess, 0);
+
+  // per-location tally
+  const byLoc = {};
+  auditDayList.forEach(d => {
+    const o = byLoc[d.loc] || (byLoc[d.loc] = { days: 0, flagged: 0, excess: 0 });
+    o.days++; if (d.state === 'flag') o.flagged++; o.excess += d.excess;
+  });
+
+  summaryEl.innerHTML = `
+    <div class="stat-row">
+      <div class="stat"><div class="n">${auditDayList.length}</div><div class="l">Backfilled days checked</div></div>
+      <div class="stat"><div class="n ${flaggedDays ? 'bad' : ''}">${flaggedDays}</div><div class="l">Days over-reported</div></div>
+      <div class="stat"><div class="n ${totalExcess ? 'bad' : ''}">${totalExcess}</div><div class="l">Bottles over-reported</div></div>
+      <div class="stat"><div class="n">${unverified}</div><div class="l">Could not verify</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:8px;">By location</h3>
+      <div class="audit-wrap"><table class="audit-table" style="min-width:420px;">
+        <tr><th>Location</th><th>Backfilled days</th><th>Over-reported days</th><th>Bottles over-reported</th></tr>
+        ${Object.entries(byLoc).sort((a, b) => b[1].excess - a[1].excess).map(([name, o]) =>
+          `<tr class="${o.flagged ? 'flag' : ''}"><td>${esc(name)}</td><td>${o.days}</td><td>${o.flagged}</td><td><strong>${o.excess}</strong></td></tr>`).join('')}
+      </table></div>
+    </div>`;
+
+  const flaggedOnly = document.getElementById('auditFlaggedOnly').checked;
+  const flaggedKeys = new Set(auditDayList.filter(d => d.state === 'flag').map(d => d.loc + '|' + d.date));
+  let rows = auditRows.filter(r => !flaggedOnly || flaggedKeys.has(r.loc + '|' + r.date));
+  rows = [...rows].sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : a.loc.localeCompare(b.loc));
+
+  let html = `<div class="card"><h3 style="margin-bottom:8px;">Day-by-day</h3><div class="audit-wrap"><table class="audit-table">
+    <tr><th>Missed day</th><th>Location</th><th>Filled in on</th><th>Product</th><th>Really in fridge</th><th>Sold reported</th><th>Over by</th><th>Supply that arrived after the missed day</th><th>Result</th></tr>`;
+  rows.forEach(r => {
+    html += `<tr class="${r.state === 'flag' ? 'flag' : ''}">
+      <td>${esc(r.date)}</td><td>${esc(r.loc)}</td><td>${esc(r.backfilledOn)}</td><td>${esc(r.product)}</td>
+      <td>${r.available}</td><td>${r.sold}</td>
+      <td style="${r.excess ? 'color:var(--red); font-weight:700;' : ''}">${r.excess || '—'}</td>
+      <td>${r.lateSupply ? '+' + r.lateSupply : '—'}</td>
+      <td>${r.state === 'flag' ? '⚠️ Over-reported' : '✅ OK'}</td></tr>`;
+  });
+  auditDayList.filter(d => d.state === 'unverified' && !flaggedOnly).forEach(d => {
+    html += `<tr class="unverified"><td>${esc(d.date)}</td><td>${esc(d.loc)}</td><td>${esc(d.backfilledOn)}</td><td colspan="5">No earlier live report to compare against</td><td>Could not verify</td></tr>`;
+  });
+  html += '</table></div></div>';
+  boxEl.innerHTML = rows.length || unverified ? html : '<div class="card"><div class="empty-state">Nothing to show for these filters.</div></div>';
+}
+
+function exportAuditCSV() {
+  if (!auditRows.length) { alert('Run the audit first.'); return; }
+  const headers = ['Missed day', 'Location', 'Filled in on', 'Product', 'Really in fridge', 'Sold reported', 'Over by', 'Supply arrived after missed day', 'Result'];
+  const q = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const lines = auditRows.map(r => [r.date, r.loc, r.backfilledOn, r.product, r.available, r.sold, r.excess, r.lateSupply, r.state === 'flag' ? 'Over-reported' : 'OK'].map(q).join(','));
+  const csv = [headers.map(q).join(','), ...lines].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `backfill-audit-${todayStr()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+if (sessionStorage.getItem('ithri_admin_auth') === 'true') {
+  setDefaults();
+  loadLocationsList().catch(e => console.error(e));
+}
+</script>
+</body>
+</html>

@@ -29,8 +29,12 @@
     <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">
       No report was sent for <strong id="backfillDateLabel">that day</strong>. Before you can continue, please enter what you sold on <strong id="backfillDateLabel2">that day</strong> so your sales records stay accurate.
     </p>
+    <div class="alert warn" style="margin-bottom:12px; font-size:0.85rem;">
+      <strong>🧊 What was in the fridge on <span id="backfillDateLabel3">that day</span></strong><br>
+      These figures are worked out from your last submitted report plus supplies delivered up to and including that day. Supplies delivered <u>after</u> that day are not counted for it, and you cannot report selling more than was in the fridge. If a figure looks wrong, please tell the admin.
+    </div>
     <div class="card" style="background:var(--light-gray); margin-bottom:12px;">
-      <h3 style="margin-bottom:8px;">Opening Stock (as at that day)</h3>
+      <h3 style="margin-bottom:8px;">Fridge Stock on <span id="backfillDateLabel4">that day</span></h3>
       <div id="backfillOpeningList"></div>
     </div>
     <div id="backfillSoldInputs"></div>
@@ -177,9 +181,11 @@ let suppliedStock = {};
 let thresholds = {};
 let calculatedData = null;
 let locationOffDays = [];
-let backfillOpeningStock = null;
 let backfillQueue = [];   // array of date strings (oldest first) still needing a report
 let backfillIndex = 0;    // which one in the queue we're currently showing
+let backfillLedger = null; // { running, pending } — stock as it stood, rolled forward day by day
+let backfillDay = null;    // { date, opening, carried, received, products } for the day on screen
+let backfillProducts = []; // every product that should be listed
 
 function dayOfWeekFromDateStr(dateStr) {
   return new Date(dateStr + 'T12:00:00').getDay();
@@ -187,6 +193,112 @@ function dayOfWeekFromDateStr(dateStr) {
 
 function dateStrMinusDays(n) {
   return todayStr(new Date(Date.now() - n * 86400000));
+}
+
+// ===== STOCK RECONSTRUCTION FOR MISSED DAYS =====
+// Rule: a missed day's opening stock is what was really in the fridge that day =
+//   closing stock of the last real report
+// + supplies / stock adjustments that happened AFTER that report and ON OR BEFORE that day.
+// Anything delivered after the missed day does not exist yet for that day.
+// Dates use the same todayStr() convention as the daily logs, so they line up.
+
+function eventDateStr(ms) { return todayStr(new Date(ms)); }
+function endOfDateMs(dateStr) { return Date.parse(dateStr + 'T23:59:59.999Z'); }
+
+// Everything that changed this location's stock outside of a merchandiser report:
+// supplier-confirmed supplies, admin direct adds (stored as confirmed supplies), and admin corrections.
+async function loadStockEvents() {
+  const events = [];
+
+  const supSnap = await db.collection('supplyRequests')
+    .where('locationId', '==', session.locationId)
+    .where('status', '==', 'confirmed').get();
+  supSnap.forEach(doc => {
+    const d = doc.data();
+    const t = d.confirmedAt || d.createdAt;   // supplier tap = delivery date; admin direct add = date added
+    if (!t || !t.toMillis || !d.items) return;
+    const delta = {};
+    for (const [p, q] of Object.entries(d.items)) { const n = Number(q) || 0; if (n) delta[p] = n; }
+    if (Object.keys(delta).length) events.push({ ts: t.toMillis(), kind: d.addedByAdmin ? 'admin_add' : 'supply', delta });
+  });
+
+  // Admin "Edit / Correct Stock". (Direct adds are also logged here, but they are already counted
+  // above as confirmed supplies, so only corrections are taken from this collection.)
+  const adjSnap = await db.collection('stockAdjustments')
+    .where('locationId', '==', session.locationId).get();
+  adjSnap.forEach(doc => {
+    const d = doc.data();
+    if (d.type !== 'correction' || !d.createdAt || !d.createdAt.toMillis) return;
+    const delta = {};
+    const prods = new Set([...Object.keys(d.previousStock || {}), ...Object.keys(d.newStock || {})]);
+    prods.forEach(p => {
+      const diff = (Number(d.newStock && d.newStock[p]) || 0) - (Number(d.previousStock && d.previousStock[p]) || 0);
+      if (diff) delta[p] = diff;
+    });
+    if (Object.keys(delta).length) events.push({ ts: d.createdAt.toMillis(), kind: 'correction', delta });
+  });
+
+  events.sort((a, b) => a.ts - b.ts);
+  return events;
+}
+
+// Latest real (submitted/flagged) report before the oldest missed day.
+async function findBaselineLog(oldestMissedDate) {
+  const snap = await db.collection('locations').doc(session.locationId).collection('logs')
+    .where('date', '<', oldestMissedDate).orderBy('date', 'desc').limit(10).get();
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    if ((d.status === 'submitted' || d.status === 'flagged') && d.closingStock) return d;
+  }
+  return null;
+}
+
+// The moment from which later events still need adding. A live report is stamped with the exact time it was
+// sent (so a supply confirmed later that same evening still counts). A backfilled report only speaks for its
+// own calendar day, so anything dated after that day still needs adding.
+function baselineCutoffMs(log) {
+  if (!log.backfilled && log.submittedAt && log.submittedAt.toMillis) return log.submittedAt.toMillis();
+  return endOfDateMs(log.date);
+}
+
+async function buildBackfillLedger(oldestMissedDate, currentMap) {
+  const events = await loadStockEvents();
+  const baseline = await findBaselineLog(oldestMissedDate);
+  let running = {};
+  let pending = [];
+
+  if (baseline) {
+    running = { ...baseline.closingStock };
+    const cutoff = baselineCutoffMs(baseline);
+    pending = events.filter(e => e.ts > cutoff);
+  } else {
+    // No earlier report to anchor on (brand-new location): walk back from today's stock instead.
+    pending = events.filter(e => eventDateStr(e.ts) >= oldestMissedDate);
+    const cur = { ...currentMap };
+    pending.forEach(e => { for (const [p, q] of Object.entries(e.delta)) cur[p] = (cur[p] || 0) - q; });
+    for (const p of Object.keys(cur)) running[p] = Math.max(0, cur[p]);
+  }
+  return { running, pending };
+}
+
+// Works out the fridge stock for one missed day and consumes the events dated on/before it.
+function computeBackfillDay(dateStr) {
+  const carried = { ...backfillLedger.running };
+  const received = {};
+  const later = [];
+  for (const e of backfillLedger.pending) {
+    if (eventDateStr(e.ts) <= dateStr) {
+      for (const [p, q] of Object.entries(e.delta)) received[p] = (received[p] || 0) + q;
+    } else {
+      later.push(e);
+    }
+  }
+  backfillLedger.pending = later;
+
+  const products = Array.from(new Set([...backfillProducts, ...Object.keys(carried), ...Object.keys(received)]));
+  const opening = {};
+  products.forEach(p => { opening[p] = Math.max(0, (carried[p] || 0) + (received[p] || 0)); });
+  return { date: dateStr, opening, carried, received, products };
 }
 
 async function init() {
@@ -237,9 +349,11 @@ async function init() {
     if (backfillQueue.length > 0) {
       backfillQueue.reverse(); // oldest missed day first
       backfillIndex = 0;
-      backfillOpeningStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
-        ? locationData.currentStock
-        : suppliedStock;
+      // Rebuild what the fridge really held on each missed day (NOT today's stock, which already
+      // contains supplies that arrived after the missed days).
+      backfillProducts = Array.from(new Set([...Object.keys(openingStock), ...Object.keys(suppliedStock)]));
+      backfillLedger = await buildBackfillLedger(backfillQueue[0], openingStock);
+      backfillDay = null;
       document.getElementById('backfillStatusCard').classList.add('hidden');
       showBackfillGate();
       return;
@@ -262,8 +376,14 @@ function showBackfillGate() {
   const dateLabelText = new Date(targetDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   const remaining = backfillQueue.length - backfillIndex;
 
-  document.getElementById('backfillDateLabel').textContent = dateLabelText;
-  document.getElementById('backfillDateLabel2').textContent = dateLabelText;
+  // Work out (once per day) what was actually in the fridge on that day
+  if (!backfillDay || backfillDay.date !== targetDate) backfillDay = computeBackfillDay(targetDate);
+  const { opening, carried, received, products } = backfillDay;
+
+  ['backfillDateLabel', 'backfillDateLabel2', 'backfillDateLabel3', 'backfillDateLabel4'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = dateLabelText;
+  });
 
   const progressEl = document.getElementById('backfillProgress');
   if (progressEl) {
@@ -277,69 +397,116 @@ function showBackfillGate() {
   openingList.innerHTML = '';
   soldInputsEl.innerHTML = '';
 
-  for (const [product, qty] of Object.entries(backfillOpeningStock)) {
+  for (const product of products) {
+    const qty = opening[product];
+    const was = carried[product] || 0;
+    const got = received[product] || 0;
+    let breakdown = `${was} left from your last report`;
+    if (got > 0) breakdown += ` + ${got} received by ${dateLabelText}`;
+    else if (got < 0) breakdown += ` − ${Math.abs(got)} stock correction`;
+
     openingList.innerHTML += `
       <div class="flex-between" style="padding:6px 0; border-bottom:1px solid #ddd; font-size:0.9rem;">
-        <span>${product}</span><strong>${qty} units</strong>
+        <span>${product}<div style="font-size:0.72rem; color:var(--gray);">${breakdown}</div></span>
+        <strong style="color:${qty <= 0 ? 'var(--red)' : 'inherit'}">${qty} units</strong>
       </div>`;
-    soldInputsEl.innerHTML += `<label>${product} — units sold on ${dateLabelText}</label><input type="number" min="0" id="backfill_sold_${sanitize(product)}" placeholder="0">`;
+
+    const key = sanitize(product);
+    if (qty <= 0) {
+      soldInputsEl.innerHTML += `
+        <label>${product} — units sold on ${dateLabelText}</label>
+        <input type="number" id="backfill_sold_${key}" value="0" disabled>
+        <div style="font-size:0.75rem; color:var(--red); margin:-6px 0 10px;">The fridge had none of this on ${dateLabelText}, so nothing could have been sold.</div>`;
+    } else {
+      soldInputsEl.innerHTML += `
+        <label>${product} — units sold on ${dateLabelText}</label>
+        <input type="number" min="0" max="${qty}" id="backfill_sold_${key}" placeholder="0">
+        <div style="font-size:0.75rem; color:var(--gray); margin:-6px 0 10px;">Maximum: ${qty}</div>`;
+    }
   }
 
   document.getElementById('loadingMsg').classList.add('hidden');
   document.getElementById('backfillBanner').classList.remove('hidden');
   document.getElementById('backfillError').classList.add('hidden');
+  window.scrollTo({ top: 0 });
 }
 
 async function submitBackfillReport() {
   const targetDate = backfillQueue[backfillIndex];
+  const dateLabelText = new Date(targetDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const { opening, received, products } = backfillDay;
   const soldQty = {};
   const closingStock = {};
-  let valid = true;
+  const errorEl = document.getElementById('backfillError');
+  errorEl.classList.add('hidden');
 
-  for (const product of Object.keys(backfillOpeningStock)) {
-    const key = sanitize(product);
-    const soldVal = parseFloat(document.getElementById(`backfill_sold_${key}`).value);
-    if (isNaN(soldVal) || soldVal < 0) { valid = false; break; }
+  for (const product of products) {
+    const input = document.getElementById(`backfill_sold_${sanitize(product)}`);
+    const soldVal = input ? parseFloat(input.value) : 0;
+    if (isNaN(soldVal) || soldVal < 0) {
+      errorEl.textContent = 'Please enter a valid sold quantity (0 or more) for every product.';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    // The anti-cheat rule: you can't sell what wasn't in the fridge that day
+    if (soldVal > opening[product]) {
+      errorEl.textContent = opening[product] <= 0
+        ? `${product}: the fridge had none on ${dateLabelText}, so sold must be 0.`
+        : `${product}: you entered ${soldVal} sold, but only ${opening[product]} were in the fridge on ${dateLabelText}. Please correct it.`;
+      errorEl.classList.remove('hidden');
+      if (input) input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     soldQty[product] = soldVal;
-    closingStock[product] = Math.max(0, backfillOpeningStock[product] - soldVal);
-  }
-
-  if (!valid) {
-    document.getElementById('backfillError').textContent = 'Please enter a valid sold quantity (0 or more) for every product.';
-    document.getElementById('backfillError').classList.remove('hidden');
-    return;
+    closingStock[product] = opening[product] - soldVal;
   }
 
   const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(targetDate);
   const locRef = db.collection('locations').doc(session.locationId);
 
   try {
-    await logRef.set({
-      date: targetDate, locationId: session.locationId, locationName: session.locationName,
-      openingStock: backfillOpeningStock, closingStock, soldQty,
-      status: 'submitted', backfilled: true,
-      backfilledOn: today,
-      submittedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+    // One atomic step: save that day's report AND take the sold bottles off the live stock.
+    // Live stock is only reduced (never overwritten), so supplies delivered after the missed day stay intact.
+    await db.runTransaction(async (t) => {
+      const locSnap = await t.get(locRef);
+      const ld = locSnap.data() || {};
+      const live = (ld.currentStock && Object.keys(ld.currentStock).length > 0) ? { ...ld.currentStock } : { ...(ld.products || {}) };
+      for (const p of products) {
+        if (soldQty[p] > 0) live[p] = Math.max(0, (live[p] || 0) - soldQty[p]);
+      }
+      t.set(logRef, {
+        date: targetDate, locationId: session.locationId, locationName: session.locationName,
+        openingStock: opening, closingStock, soldQty,
+        suppliedBeforeDay: received,          // net supplies/adjustments counted up to that day
+        status: 'submitted', backfilled: true,
+        backfillRule: 'capped',               // marks reports made under the "can't sell more than was in the fridge" rule
+        backfilledOn: today,
+        submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      t.update(locRef, { currentStock: live });
+    });
 
-    // Each backfilled day's closing stock becomes the opening for the next missed day (or today)
-    await locRef.update({ currentStock: closingStock });
-    backfillOpeningStock = { ...closingStock };
+    // This day's closing is the starting point for the next missed day
+    backfillLedger.running = { ...closingStock };
+    backfillDay = null;
 
     backfillIndex++;
     if (backfillIndex < backfillQueue.length) {
       // More missed days remain — show the next one in sequence
       showBackfillGate();
     } else {
-      // All missed days backfilled — proceed straight into today's form
-      openingStock = { ...closingStock };
+      // All missed days done — today's opening stock = live stock (includes supplies delivered since)
+      const fresh = await locRef.get();
+      const fd = fresh.data() || {};
+      openingStock = (fd.currentStock && Object.keys(fd.currentStock).length > 0) ? fd.currentStock : (fd.products || {});
       document.getElementById('backfillBanner').classList.add('hidden');
+      document.getElementById('backfillStatusCard').classList.remove('hidden');
       renderForms();
       document.getElementById('mainContent').classList.remove('hidden');
     }
   } catch(e) {
-    document.getElementById('backfillError').textContent = 'Failed to submit. Check your connection and try again.';
-    document.getElementById('backfillError').classList.remove('hidden');
+    errorEl.textContent = 'Failed to submit. Check your connection and try again.';
+    errorEl.classList.remove('hidden');
     console.error(e);
   }
 }
