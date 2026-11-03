@@ -215,11 +215,15 @@ async function loadStockEvents() {
     .where('status', '==', 'confirmed').get();
   supSnap.forEach(doc => {
     const d = doc.data();
-    const t = d.confirmedAt || d.createdAt;   // supplier tap = delivery date; admin direct add = date added
-    if (!t || !t.toMillis || !d.items) return;
+    // Delivery date: the date the supplier stated when confirming (deliveredOn) wins. Older supplies, confirmed
+    // before that rule existed, fall back to the moment the supplier tapped; admin direct adds use the date added.
+    let ms = null;
+    if (typeof d.deliveredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.deliveredOn)) ms = Date.parse(d.deliveredOn + 'T00:00:00Z');
+    else { const t = d.confirmedAt || d.createdAt; if (t && t.toMillis) ms = t.toMillis(); }
+    if (ms == null || !d.items) return;
     const delta = {};
     for (const [p, q] of Object.entries(d.items)) { const n = Number(q) || 0; if (n) delta[p] = n; }
-    if (Object.keys(delta).length) events.push({ ts: t.toMillis(), kind: d.addedByAdmin ? 'admin_add' : 'supply', delta });
+    if (Object.keys(delta).length) events.push({ ts: ms, kind: d.addedByAdmin ? 'admin_add' : 'supply', delta });
   });
 
   // Admin "Edit / Correct Stock". (Direct adds are also logged here, but they are already counted

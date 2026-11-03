@@ -7,11 +7,13 @@
 <link rel="stylesheet" href="shared/style.css">
 <style>
   .audit-wrap { overflow-x:auto; }
-  .audit-table { width:100%; border-collapse:collapse; min-width:820px; font-size:0.84rem; }
-  .audit-table th { text-align:left; background:var(--green-dark, #1b5e20); color:#fff; padding:8px 10px; white-space:nowrap; }
-  .audit-table td { padding:7px 10px; border-bottom:1px solid #e3e3e3; vertical-align:top; }
+  .audit-table { width:100%; border-collapse:collapse; min-width:900px; font-size:0.82rem; }
+  .audit-table th { text-align:left; background:var(--green-dark, #1b5e20); color:#fff; padding:8px 8px; white-space:nowrap; }
+  .audit-table td { padding:7px 8px; border-bottom:1px solid #e3e3e3; vertical-align:top; }
   .audit-table tr.flag td { background:#fde2e2; }
   .audit-table tr.unverified td { background:#f4f4f4; color:#777; }
+  .audit-table tr.cleared td { background:#e8f5e9; }
+  .audit-table .small-note { font-size:0.74rem; color:#555; display:block; margin-top:2px; }
   .stat-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:14px; }
   .stat { background:#fff; border-radius:var(--radius, 10px); padding:12px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
   .stat .n { font-size:1.5rem; font-weight:800; color:var(--green-dark, #1b5e20); }
@@ -37,6 +39,7 @@
         Re-checks every <strong>backfilled</strong> (missed-day) report. For each one it works out what was really in the fridge that day —
         the merchandiser's last live report plus supplies and stock corrections up to that day — and compares it with the sales she reported.
         Anything sold above that amount is flagged. Reports made before the new cap rule will show up here if they over-reported.
+        If a flagged day turns out to be legitimate, tap <strong>Mark as checked</strong> and give a reason — it is saved and no longer counted.
       </p>
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
         <div><label>Location</label><select id="auditLocation" style="margin-bottom:0;"><option value="">All locations</option></select></div>
@@ -71,11 +74,25 @@ if (sessionStorage.getItem('ithri_admin_auth') !== 'true') {
 let auditRows = [];      // one entry per location/day/product
 let auditDayList = [];   // one entry per location/day
 let allAuditLocations = [];
+let auditReviews = {};   // 'locationId|date' -> admin note (days the admin has marked as checked)
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
 function eventDateStr(ms) { return todayStr(new Date(ms)); }
 function endOfDateMs(dateStr) { return Date.parse(dateStr + 'T23:59:59.999Z'); }
 function shiftDate(dateStr, days) { return todayStr(new Date(Date.parse(dateStr + 'T12:00:00Z') + days * 86400000)); }
+
+function shortDate(ms) { return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }); }
+function describeEvent(e) {
+  if (e.kind === 'supplier' && e.deliveredOn) {
+    return `delivered ${shortDate(e.ts)}` + (e.confirmed ? `, supplier confirmed ${shortDate(e.confirmed)}` : '');
+  }
+  if (e.kind === 'supplier') {
+    const logged = e.created ? shortDate(e.created) : '?';
+    return e.confirmed ? `supply logged ${logged}, supplier confirmed ${shortDate(e.confirmed)}` : `supply logged ${logged}`;
+  }
+  if (e.kind === 'admin') return `added by admin ${shortDate(e.ts)}`;
+  return `stock correction ${shortDate(e.ts)}`;
+}
 
 function setDefaults() {
   const t = todayStr();
@@ -99,11 +116,17 @@ async function loadEvents(locId) {
   const supSnap = await db.collection('supplyRequests').where('locationId', '==', locId).where('status', '==', 'confirmed').get();
   supSnap.forEach(doc => {
     const d = doc.data();
-    const t = d.confirmedAt || d.createdAt;
-    if (!t || !t.toMillis || !d.items) return;
+    // Same rule as the stock page: the delivery date the supplier stated (deliveredOn) wins; older supplies use the tap time
+    let ms = null;
+    const hasDelivered = typeof d.deliveredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.deliveredOn);
+    if (hasDelivered) ms = Date.parse(d.deliveredOn + 'T00:00:00Z');
+    else { const t = d.confirmedAt || d.createdAt; if (t && t.toMillis) ms = t.toMillis(); }
+    if (ms == null || !d.items) return;
     const delta = {};
     for (const [p, q] of Object.entries(d.items)) { const n = Number(q) || 0; if (n) delta[p] = n; }
-    if (Object.keys(delta).length) events.push({ ts: t.toMillis(), delta });
+    if (Object.keys(delta).length) events.push({ ts: ms, delta, kind: d.addedByAdmin ? 'admin' : 'supplier', deliveredOn: hasDelivered,
+      created: d.createdAt && d.createdAt.toMillis ? d.createdAt.toMillis() : null,
+      confirmed: d.confirmedAt && d.confirmedAt.toMillis ? d.confirmedAt.toMillis() : null });
   });
   const adjSnap = await db.collection('stockAdjustments').where('locationId', '==', locId).get();
   adjSnap.forEach(doc => {
@@ -115,7 +138,7 @@ async function loadEvents(locId) {
       const diff = (Number(d.newStock && d.newStock[p]) || 0) - (Number(d.previousStock && d.previousStock[p]) || 0);
       if (diff) delta[p] = diff;
     });
-    if (Object.keys(delta).length) events.push({ ts: d.createdAt.toMillis(), delta });
+    if (Object.keys(delta).length) events.push({ ts: d.createdAt.toMillis(), delta, kind: 'correction' });
   });
   events.sort((a, b) => a.ts - b.ts);
   return events;
@@ -139,6 +162,9 @@ async function auditLocation(loc, from, to) {
   if (!logs.some(l => l.backfilled && l.date >= from && l.date <= to)) return { days, rows };
 
   const events = await loadEvents(loc.id);
+  const revSnap = await db.collection('auditReviews').where('locationId', '==', loc.id).get();
+  revSnap.forEach(doc => { const d = doc.data(); if (d.date) auditReviews[loc.id + '|' + d.date] = d.note || '(no reason saved)'; });
+  let anchorDate = null, anchorClosing = {};   // the last live report the chain starts from
   let running = null;      // stock after the last report that was replayed
   let pending = [];        // events not yet counted
 
@@ -148,6 +174,7 @@ async function auditLocation(loc, from, to) {
     if (!log.backfilled) {
       // A live report is a real physical count — it re-anchors everything
       running = { ...(log.closingStock || {}) };
+      anchorDate = log.date; anchorClosing = { ...(log.closingStock || {}) };
       const c = cutoffMs(log);
       pending = events.filter(e => e.ts > c);
       continue;
@@ -158,7 +185,7 @@ async function auditLocation(loc, from, to) {
     const backfilledOn = log.backfilledOn || (log.submittedAt && log.submittedAt.toMillis ? eventDateStr(log.submittedAt.toMillis()) : '');
 
     if (running === null) {
-      if (inWindow) days.push({ loc: loc.name, date: log.date, backfilledOn, state: 'unverified', excess: 0 });
+      if (inWindow) days.push({ loc: loc.name, locId: loc.id, date: log.date, backfilledOn, state: 'unverified', excess: 0 });
       continue;
     }
 
@@ -172,10 +199,14 @@ async function auditLocation(loc, from, to) {
 
     // Supplies that landed AFTER the missed day but BEFORE the report was filled in — the loophole amount
     const lateSupply = {};
+    const lateNotes = {};
     for (const e of later) {
       const ed = eventDateStr(e.ts);
       if (backfilledOn && ed > log.date && ed <= backfilledOn) {
-        for (const [p, q] of Object.entries(e.delta)) if (q > 0) lateSupply[p] = (lateSupply[p] || 0) + q;
+        for (const [p, q] of Object.entries(e.delta)) if (q > 0) {
+          lateSupply[p] = (lateSupply[p] || 0) + q;
+          (lateNotes[p] = lateNotes[p] || []).push(`+${q}: ${describeEvent(e)}`);
+        }
       }
     }
 
@@ -190,16 +221,18 @@ async function auditLocation(loc, from, to) {
       dayExcess += excess;
       after[p] = Math.max(0, available[p] - s);
       if (inWindow && (s > 0 || available[p] > 0)) {
-        rows.push({ loc: loc.name, date: log.date, backfilledOn, product: p, available: available[p], sold: s, excess,
-                    lateSupply: lateSupply[p] || 0, state: excess > 0 ? 'flag' : 'ok' });
+        const rec = log.openingStock && log.openingStock[p] != null ? Number(log.openingStock[p]) : null;
+        rows.push({ loc: loc.name, locId: loc.id, date: log.date, backfilledOn, product: p, recorded: rec, available: available[p], sold: s, excess,
+                    lateSupply: lateSupply[p] || 0, lateNotes: lateNotes[p] || [], anchorDate, anchorClosing: anchorClosing[p] != null ? anchorClosing[p] : null,
+                    state: excess > 0 ? 'flag' : 'ok' });
       }
     });
     running = after;
 
     if (inWindow) {
-      days.push({ loc: loc.name, date: log.date, backfilledOn, state: dayExcess > 0 ? 'flag' : 'ok', excess: dayExcess });
+      days.push({ loc: loc.name, locId: loc.id, date: log.date, backfilledOn, state: dayExcess > 0 ? 'flag' : 'ok', excess: dayExcess });
       if (!rows.some(r => r.loc === loc.name && r.date === log.date)) {
-        rows.push({ loc: loc.name, date: log.date, backfilledOn, product: '— nothing in fridge, no sales —', available: 0, sold: 0, excess: 0, lateSupply: 0, state: 'ok' });
+        rows.push({ loc: loc.name, locId: loc.id, date: log.date, backfilledOn, product: '— nothing in fridge, no sales —', recorded: null, available: 0, sold: 0, excess: 0, lateSupply: 0, lateNotes: [], anchorDate, anchorClosing: null, state: 'ok' });
       }
     }
   }
@@ -215,7 +248,7 @@ async function runAudit() {
   if (!from || !to) { alert('Pick a from and to date.'); return; }
 
   btn.disabled = true;
-  auditRows = []; auditDayList = [];
+  auditRows = []; auditDayList = []; auditReviews = {};
   document.getElementById('auditSummary').innerHTML = '';
   document.getElementById('auditTableBox').innerHTML = '';
 
@@ -238,6 +271,13 @@ async function runAudit() {
   btn.disabled = false;
 }
 
+// 'flag' = over-reported and not yet checked, 'cleared' = over-reported but the admin marked it as checked
+function stateOf(x) {
+  if (x.state === 'unverified') return 'unverified';
+  if (x.excess > 0) return auditReviews[x.locId + '|' + x.date] !== undefined ? 'cleared' : 'flag';
+  return 'ok';
+}
+
 function renderAudit() {
   const summaryEl = document.getElementById('auditSummary');
   const boxEl = document.getElementById('auditTableBox');
@@ -249,15 +289,17 @@ function renderAudit() {
     return;
   }
 
-  const flaggedDays = auditDayList.filter(d => d.state === 'flag').length;
+  const flaggedDays = auditDayList.filter(d => stateOf(d) === 'flag').length;
+  const clearedDays = auditDayList.filter(d => stateOf(d) === 'cleared').length;
   const unverified = auditDayList.filter(d => d.state === 'unverified').length;
-  const totalExcess = auditDayList.reduce((n, d) => n + d.excess, 0);
+  const totalExcess = auditDayList.filter(d => stateOf(d) === 'flag').reduce((n, d) => n + d.excess, 0);
 
-  // per-location tally
+  // per-location tally (only days still flagged count as over-reported)
   const byLoc = {};
   auditDayList.forEach(d => {
     const o = byLoc[d.loc] || (byLoc[d.loc] = { days: 0, flagged: 0, excess: 0 });
-    o.days++; if (d.state === 'flag') o.flagged++; o.excess += d.excess;
+    o.days++;
+    if (stateOf(d) === 'flag') { o.flagged++; o.excess += d.excess; }
   });
 
   summaryEl.innerHTML = `
@@ -265,6 +307,7 @@ function renderAudit() {
       <div class="stat"><div class="n">${auditDayList.length}</div><div class="l">Backfilled days checked</div></div>
       <div class="stat"><div class="n ${flaggedDays ? 'bad' : ''}">${flaggedDays}</div><div class="l">Days over-reported</div></div>
       <div class="stat"><div class="n ${totalExcess ? 'bad' : ''}">${totalExcess}</div><div class="l">Bottles over-reported</div></div>
+      <div class="stat"><div class="n">${clearedDays}</div><div class="l">Marked as checked</div></div>
       <div class="stat"><div class="n">${unverified}</div><div class="l">Could not verify</div></div>
     </div>
     <div class="card">
@@ -277,32 +320,82 @@ function renderAudit() {
     </div>`;
 
   const flaggedOnly = document.getElementById('auditFlaggedOnly').checked;
-  const flaggedKeys = new Set(auditDayList.filter(d => d.state === 'flag').map(d => d.loc + '|' + d.date));
-  let rows = auditRows.filter(r => !flaggedOnly || flaggedKeys.has(r.loc + '|' + r.date));
+  const flaggedKeys = new Set(auditDayList.filter(d => stateOf(d) === 'flag').map(d => d.locId + '|' + d.date));
+  let rows = auditRows.filter(r => !flaggedOnly || flaggedKeys.has(r.locId + '|' + r.date));
   rows = [...rows].sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : a.loc.localeCompare(b.loc));
 
-  let html = `<div class="card"><h3 style="margin-bottom:8px;">Day-by-day</h3><div class="audit-wrap"><table class="audit-table">
-    <tr><th>Missed day</th><th>Location</th><th>Filled in on</th><th>Product</th><th>Really in fridge</th><th>Sold reported</th><th>Over by</th><th>Supply that arrived after the missed day</th><th>Result</th></tr>`;
+  let html = `<div class="card"><h3 style="margin-bottom:8px;">Day-by-day</h3>
+    <p style="font-size:0.8rem; color:var(--gray); margin-bottom:8px;">
+      <strong>Last live report</strong> is the physical count the day's stock is built from.
+      <strong>Opening in sales record</strong> is what the saved report showed (before the cap rule this was today's stock, so it includes later deliveries).
+      <strong>Really in fridge</strong> is the true stock that day. The difference is normally the <strong>Delivered after that day</strong> amount.<br>
+      A delivery counts from the day the <em>supplier tapped Confirm Delivered</em>. The Supply History tab shows the day the supply was <em>logged</em>, which can be earlier —
+      the dates are shown side by side below so you can see the gap. Swipe the table sideways to see every column.</p>
+    <div class="audit-wrap"><table class="audit-table">
+    <tr><th>Missed day</th><th>Location</th><th>Filled in on</th><th>Product</th><th>Last live report</th><th>Opening in sales record</th><th>Really in fridge</th><th>Sold reported</th><th>Over by</th><th>Delivered after that day</th><th>Result</th></tr>`;
   rows.forEach(r => {
-    html += `<tr class="${r.state === 'flag' ? 'flag' : ''}">
+    const st = stateOf(r);
+    const note = auditReviews[r.locId + '|' + r.date];
+    const btnAttrs = `data-loc="${esc(r.locId)}" data-date="${esc(r.date)}"`;
+    let result = '✅ OK';
+    if (st === 'flag') result = `⚠️ Over-reported<span class="small-note"><button class="btn small outline" ${btnAttrs} onclick="markChecked(this.dataset.loc, this.dataset.date)">Mark as checked</button></span>`;
+    if (st === 'cleared') result = `✔ Checked by admin<span class="small-note">${esc(note)}</span><span class="small-note"><button class="btn small outline" ${btnAttrs} onclick="undoChecked(this.dataset.loc, this.dataset.date)">Undo</button></span>`;
+    const liveReport = r.anchorDate ? `${esc(shortDate(Date.parse(r.anchorDate + 'T12:00:00Z')))}: closed with ${r.anchorClosing == null ? '—' : r.anchorClosing}` : '—';
+    const delivered = r.lateSupply ? r.lateNotes.map(n => esc(n)).join('<span class="small-note"></span>') : '—';
+    html += `<tr class="${st === 'flag' ? 'flag' : st === 'cleared' ? 'cleared' : ''}">
       <td>${esc(r.date)}</td><td>${esc(r.loc)}</td><td>${esc(r.backfilledOn)}</td><td>${esc(r.product)}</td>
-      <td>${r.available}</td><td>${r.sold}</td>
+      <td>${liveReport}</td>
+      <td>${r.recorded == null ? '—' : r.recorded}</td><td><strong>${r.available}</strong></td><td>${r.sold}</td>
       <td style="${r.excess ? 'color:var(--red); font-weight:700;' : ''}">${r.excess || '—'}</td>
-      <td>${r.lateSupply ? '+' + r.lateSupply : '—'}</td>
-      <td>${r.state === 'flag' ? '⚠️ Over-reported' : '✅ OK'}</td></tr>`;
+      <td>${delivered}</td>
+      <td>${result}</td></tr>`;
   });
   auditDayList.filter(d => d.state === 'unverified' && !flaggedOnly).forEach(d => {
-    html += `<tr class="unverified"><td>${esc(d.date)}</td><td>${esc(d.loc)}</td><td>${esc(d.backfilledOn)}</td><td colspan="5">No earlier live report to compare against</td><td>Could not verify</td></tr>`;
+    html += `<tr class="unverified"><td>${esc(d.date)}</td><td>${esc(d.loc)}</td><td>${esc(d.backfilledOn)}</td><td colspan="7">No earlier live report to compare against</td><td>Could not verify</td></tr>`;
   });
   html += '</table></div></div>';
   boxEl.innerHTML = rows.length || unverified ? html : '<div class="card"><div class="empty-state">Nothing to show for these filters.</div></div>';
 }
 
+async function markChecked(locId, date) {
+  const day = auditDayList.find(d => d.locId === locId && d.date === date);
+  const note = prompt('Why is this day OK? Give a short reason, e.g. "Delivered 27 Oct, supplier confirmed late".');
+  if (note === null) return;
+  if (!note.trim()) { alert('Please type a short reason.'); return; }
+  try {
+    await db.collection('auditReviews').doc(locId + '_' + date).set({
+      locationId: locId, locationName: day ? day.loc : '', date, note: note.trim(),
+      excessAtReview: day ? day.excess : 0,
+      reviewedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    auditReviews[locId + '|' + date] = note.trim();
+    renderAudit();
+  } catch (e) {
+    console.error(e);
+    alert('Could not save. Check your connection and try again.');
+  }
+}
+
+async function undoChecked(locId, date) {
+  if (!confirm('Put this day back as over-reported?')) return;
+  try {
+    await db.collection('auditReviews').doc(locId + '_' + date).delete();
+    delete auditReviews[locId + '|' + date];
+    renderAudit();
+  } catch (e) {
+    console.error(e);
+    alert('Could not undo. Check your connection and try again.');
+  }
+}
+
 function exportAuditCSV() {
   if (!auditRows.length) { alert('Run the audit first.'); return; }
-  const headers = ['Missed day', 'Location', 'Filled in on', 'Product', 'Really in fridge', 'Sold reported', 'Over by', 'Supply arrived after missed day', 'Result'];
+  const headers = ['Missed day', 'Location', 'Filled in on', 'Product', 'Last live report date', 'Last live report closing', 'Opening in sales record', 'Really in fridge', 'Sold reported', 'Over by', 'Delivered after that day', 'Result', 'Admin note'];
   const q = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-  const lines = auditRows.map(r => [r.date, r.loc, r.backfilledOn, r.product, r.available, r.sold, r.excess, r.lateSupply, r.state === 'flag' ? 'Over-reported' : 'OK'].map(q).join(','));
+  const label = { flag: 'Over-reported', cleared: 'Checked by admin', ok: 'OK', unverified: 'Could not verify' };
+  const lines = auditRows.map(r => [r.date, r.loc, r.backfilledOn, r.product, r.anchorDate || '', r.anchorClosing == null ? '' : r.anchorClosing,
+    r.recorded == null ? '' : r.recorded, r.available, r.sold, r.excess, (r.lateNotes || []).join(' | '), label[stateOf(r)],
+    auditReviews[r.locId + '|' + r.date] || ''].map(q).join(','));
   const csv = [headers.map(q).join(','), ...lines].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);

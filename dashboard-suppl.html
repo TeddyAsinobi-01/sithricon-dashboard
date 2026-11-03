@@ -68,6 +68,21 @@
   </div>
 </div>
 
+<!-- Delivery date modal: shown only when a supply is confirmed AFTER the day it was sent -->
+<div id="deliveryDateModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>📅 When was this delivered?</h3>
+    <p id="deliveryDateInfo" style="color:var(--gray); font-size:0.85rem; margin-bottom:12px;"></p>
+    <label>Actual delivery date</label>
+    <input type="date" id="deliveryDateInput" style="margin-bottom:10px;">
+    <div id="deliveryDateError" class="alert error hidden" style="margin-bottom:10px;"></div>
+    <div class="flex">
+      <button class="btn outline" onclick="closeDeliveryDateModal()">Cancel</button>
+      <button class="btn yellow" onclick="submitDeliveryDate()">Confirm Delivery</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
@@ -133,6 +148,7 @@ function setupTodaySupplies() {
                   <span class="badge yellow">Pending</span>
                 </div>
                 ${itemRows}
+                ${date < todayStr() ? `<div class="alert warn" style="margin-top:8px; font-size:0.82rem;">Sent on ${date}. When you confirm, you will be asked for the day it was actually delivered.</div>` : ''}
                 <div class="flex" style="margin-top:12px;">
                   <button class="btn yellow" onclick="confirmDelivery('${req.id}')">✅ Confirm Delivered</button>
                   <button class="btn danger" onclick="openIssueModal('${req.id}')">⚠️ Raise Issue</button>
@@ -145,12 +161,91 @@ function setupTodaySupplies() {
     });
 }
 
-async function confirmDelivery(requestId) {
-  if (!confirm("Confirm this supply was delivered as recorded? This will update the location's stock.")) return;
+// ===== DELIVERY DATE RULE =====
+// A supply counts as "in the fridge" from the day it was DELIVERED, so that date must be right.
+//  - Confirmed on the day the admin sent it  -> delivery date = that day (nothing to type).
+//  - Confirmed on a later day                -> the supplier must state the real delivery date.
+// false = the ONLY date allowed is the day the admin sent the supply.
+// true  = any day from the send date up to today is allowed.
+const ALLOW_LATER_DELIVERY_DATES = false;
 
+let deliveryRequestId = null;
+let deliverySentDate = null;
+let deliveryMaxDate = null;
+
+function prettyDate(dateStr) {
+  return new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+function sentDateOf(req) {
+  return req.createdAt && req.createdAt.toDate ? req.createdAt.toDate().toISOString().split('T')[0] : null;
+}
+
+async function confirmDelivery(requestId) {
+  const reqSnap = await db.collection('supplyRequests').doc(requestId).get();
+  const req = reqSnap.data();
+  if (!req || (req.status !== 'pending_confirmation' && req.status !== 'disputed')) {
+    alert('This supply has already been handled.');
+    return;
+  }
+
+  const sentDate = sentDateOf(req) || todayStr();
+  if (sentDate >= todayStr()) {
+    // Confirmed on the day it was sent: the delivery date is that day
+    if (!confirm("Confirm this supply was delivered as recorded? This will update the location's stock.")) return;
+    await finishConfirmDelivery(requestId, sentDate, false);
+    return;
+  }
+
+  // Confirmed late: make the supplier state the real delivery date
+  deliveryRequestId = requestId;
+  deliverySentDate = sentDate;
+  deliveryMaxDate = ALLOW_LATER_DELIVERY_DATES ? todayStr() : sentDate;
+
+  const input = document.getElementById('deliveryDateInput');
+  input.min = sentDate;
+  input.max = deliveryMaxDate;
+  input.value = sentDate;
+  document.getElementById('deliveryDateInfo').innerHTML =
+    `${esc(req.locationName || '')}: this supply was sent on <strong>${prettyDate(sentDate)}</strong> but is being confirmed today. ` +
+    `Enter the day it was actually delivered. ` +
+    (ALLOW_LATER_DELIVERY_DATES
+      ? `You can choose any day from ${prettyDate(sentDate)} to ${prettyDate(deliveryMaxDate)}.`
+      : `Only <strong>${prettyDate(sentDate)}</strong> is accepted — the day it was sent.`);
+  document.getElementById('deliveryDateError').classList.add('hidden');
+  document.getElementById('deliveryDateModal').classList.remove('hidden');
+}
+
+function closeDeliveryDateModal() {
+  document.getElementById('deliveryDateModal').classList.add('hidden');
+  deliveryRequestId = null; deliverySentDate = null; deliveryMaxDate = null;
+}
+
+async function submitDeliveryDate() {
+  const errEl = document.getElementById('deliveryDateError');
+  const val = document.getElementById('deliveryDateInput').value;
+  if (!val) { errEl.textContent = 'Please enter the delivery date.'; errEl.classList.remove('hidden'); return; }
+  if (val < deliverySentDate || val > deliveryMaxDate) {
+    errEl.textContent = ALLOW_LATER_DELIVERY_DATES
+      ? `That date is not allowed. Choose a day from ${prettyDate(deliverySentDate)} to ${prettyDate(deliveryMaxDate)}.`
+      : `That date is not allowed. Only ${prettyDate(deliverySentDate)} is accepted — the day the admin sent this supply.`;
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (!confirm(`Confirm this supply was delivered on ${prettyDate(val)}? This will update the location's stock.`)) return;
+  const requestId = deliveryRequestId;
+  closeDeliveryDateModal();
+  await finishConfirmDelivery(requestId, val, true);
+}
+
+async function finishConfirmDelivery(requestId, deliveredOn, enteredBySupplier) {
   const reqRef = db.collection('supplyRequests').doc(requestId);
   const reqSnap = await reqRef.get();
   const req = reqSnap.data();
+  if (!req || (req.status !== 'pending_confirmation' && req.status !== 'disputed')) {
+    alert('This supply has already been handled.');
+    return;
+  }
 
   const locRef = db.collection('locations').doc(req.locationId);
   const locSnap = await locRef.get();
@@ -161,11 +256,16 @@ async function confirmDelivery(requestId) {
   await reqRef.update({
     status: 'confirmed',
     confirmedBySupplier: true,
-    confirmedAt: firebase.firestore.FieldValue.serverTimestamp()
+    confirmedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    deliveredOn,                                   // the day the stock really reached the fridge
+    confirmedLate: deliveredOn < todayStr(),
+    deliveryDateEnteredBySupplier: !!enteredBySupplier
   });
 
   alert('Supply confirmed! Stock has been updated.');
 }
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
 
 function openIssueModal(requestId) {
   activeIssueRequestId = requestId;
@@ -270,7 +370,7 @@ async function loadSupplyHistory() {
           <strong>📍 ${d.locationName}</strong>
           <span class="badge ${d.status === 'confirmed' ? 'green' : (d.status === 'cancelled' || d.status === 'disputed' || d.status === 'cancelled_pending_admin_review') ? 'red' : 'yellow'}">${statusLabel}</span>
         </div>
-        <div style="font-size:0.78rem; color:var(--gray); margin-bottom:6px;">${dateStr}</div>
+        <div style="font-size:0.78rem; color:var(--gray); margin-bottom:6px;">${dateStr}${d.deliveredOn ? ` &nbsp;·&nbsp; Delivered: ${d.deliveredOn}${d.confirmedLate ? ' (confirmed late)' : ''}` : ''}</div>
         ${itemRows}
         ${d.supplierIssueDetails ? `<div class="alert error" style="margin-top:8px; font-size:0.85rem;"><strong>Issue:</strong> ${d.supplierIssueDetails}</div>` : ''}
       </div>`);
