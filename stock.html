@@ -205,6 +205,36 @@ function dateStrMinusDays(n) {
 function eventDateStr(ms) { return todayStr(new Date(ms)); }
 function endOfDateMs(dateStr) { return Date.parse(dateStr + 'T23:59:59.999Z'); }
 
+// Which day an event belongs to: the supplier-stated delivery date when there is one, otherwise the day of the event itself.
+function eventDay(e) { return e.deliveredDate || eventDateStr(e.ts); }
+
+// Which part of an event was NOT yet inside the last real report's closing count? Returns the amounts still to add.
+//  - delivered on a later day than the report            -> not in the count, add it all
+//  - delivered on an earlier day than the report         -> her count already includes it, add nothing
+//  - delivered on the SAME day as the report             -> if the supplier tapped Confirm AFTER she sent the report, add it all.
+//        If the supplier had already tapped before she sent it, look at her own report per product: when the opening she was
+//        shown did not include the supply AND her closing count did not rise by it, the bottles came after her count, so add them;
+//        otherwise they were already inside her figures.
+//  - supplies without a stated delivery date, corrections and admin adds -> compared by their exact time.
+function remainingDelta(e, log) {
+  const cutoff = baselineCutoffMs(log);
+  if (!e.deliveredDate) return e.ts > cutoff ? e.delta : {};
+  if (e.deliveredDate > log.date) return e.delta;
+  if (e.deliveredDate < log.date) return {};
+  if (log.backfilled) return {};                       // a backfilled day already used everything dated up to that day
+  if (e.tapTs != null && e.tapTs > cutoff) return e.delta;
+  const out = {};
+  for (const [p, q] of Object.entries(e.delta)) {
+    const o = Number(log.openingStock && log.openingStock[p]) || 0;
+    const s = Number(log.soldQty && log.soldQty[p]) || 0;
+    const c = Number(log.closingStock && log.closingStock[p]) || 0;
+    const notInOpening = o < q;
+    const notInCount = c < (o - s) + q;
+    if (notInOpening && notInCount) out[p] = q;
+  }
+  return out;
+}
+
 // Everything that changed this location's stock outside of a merchandiser report:
 // supplier-confirmed supplies, admin direct adds (stored as confirmed supplies), and admin corrections.
 async function loadStockEvents() {
@@ -217,13 +247,15 @@ async function loadStockEvents() {
     const d = doc.data();
     // Delivery date: the date the supplier stated when confirming (deliveredOn) wins. Older supplies, confirmed
     // before that rule existed, fall back to the moment the supplier tapped; admin direct adds use the date added.
-    let ms = null;
-    if (typeof d.deliveredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.deliveredOn)) ms = Date.parse(d.deliveredOn + 'T00:00:00Z');
-    else { const t = d.confirmedAt || d.createdAt; if (t && t.toMillis) ms = t.toMillis(); }
+    let ms = null, deliveredDate = null;
+    const tapT = d.confirmedAt || d.createdAt;
+    const tapTs = tapT && tapT.toMillis ? tapT.toMillis() : null;
+    if (typeof d.deliveredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.deliveredOn)) { deliveredDate = d.deliveredOn; ms = Date.parse(d.deliveredOn + 'T00:00:00Z'); }
+    else ms = tapTs;
     if (ms == null || !d.items) return;
     const delta = {};
     for (const [p, q] of Object.entries(d.items)) { const n = Number(q) || 0; if (n) delta[p] = n; }
-    if (Object.keys(delta).length) events.push({ ts: ms, kind: d.addedByAdmin ? 'admin_add' : 'supply', delta });
+    if (Object.keys(delta).length) events.push({ ts: ms, deliveredDate, tapTs, kind: d.addedByAdmin ? 'admin_add' : 'supply', delta });
   });
 
   // Admin "Edit / Correct Stock". (Direct adds are also logged here, but they are already counted
@@ -273,11 +305,10 @@ async function buildBackfillLedger(oldestMissedDate, currentMap) {
 
   if (baseline) {
     running = { ...baseline.closingStock };
-    const cutoff = baselineCutoffMs(baseline);
-    pending = events.filter(e => e.ts > cutoff);
+    pending = events.map(e => { const delta = remainingDelta(e, baseline); return Object.keys(delta).length ? { ...e, delta } : null; }).filter(Boolean);
   } else {
     // No earlier report to anchor on (brand-new location): walk back from today's stock instead.
-    pending = events.filter(e => eventDateStr(e.ts) >= oldestMissedDate);
+    pending = events.filter(e => eventDay(e) >= oldestMissedDate);
     const cur = { ...currentMap };
     pending.forEach(e => { for (const [p, q] of Object.entries(e.delta)) cur[p] = (cur[p] || 0) - q; });
     for (const p of Object.keys(cur)) running[p] = Math.max(0, cur[p]);
@@ -291,7 +322,7 @@ function computeBackfillDay(dateStr) {
   const received = {};
   const later = [];
   for (const e of backfillLedger.pending) {
-    if (eventDateStr(e.ts) <= dateStr) {
+    if (eventDay(e) <= dateStr) {
       for (const [p, q] of Object.entries(e.delta)) received[p] = (received[p] || 0) + q;
     } else {
       later.push(e);
