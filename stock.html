@@ -43,6 +43,24 @@
   </div>
 
   <div id="mainContent" class="hidden">
+    <!-- Supplies the admin sent that the supplier has not confirmed yet: they are NOT in the opening stock below -->
+    <div id="pendingSupplyCard" class="card hidden" style="border:2px solid #f0ad00;">
+      <h2 style="color:#856404;">⏳ Supply Waiting for the Supplier</h2>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+        The admin sent the supply below to your location, but the supplier has not tapped <strong>Confirm Delivered</strong> yet, so it is <u>not</u> in your opening stock.
+      </p>
+      <div id="pendingSupplyList" style="margin-bottom:10px;"></div>
+      <div class="alert warn" style="font-size:0.85rem; margin-bottom:10px;">
+        <strong>Already received it?</strong> Ask the supplier to tap <strong>Confirm Delivered</strong> now, then press Refresh. Your opening stock will then include it and your report will balance.
+      </div>
+      <button class="btn small outline" onclick="window.location.reload()">🔄 Refresh stock</button>
+      <label style="margin-top:12px; display:block;">
+        <input type="checkbox" id="pendingSupplyAck" style="width:auto; margin-right:6px;">
+        Nothing listed above has reached my fridge yet
+      </label>
+      <div id="pendingSupplyError" class="alert error hidden" style="margin-top:8px;"></div>
+    </div>
+
     <div class="card">
       <h2>Today's Opening Stock</h2>
       <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Current available stock carried forward from previous reports and admin supplies.</p>
@@ -186,6 +204,8 @@ let backfillIndex = 0;    // which one in the queue we're currently showing
 let backfillLedger = null; // { running, pending } — stock as it stood, rolled forward day by day
 let backfillDay = null;    // { date, opening, carried, received, products } for the day on screen
 let backfillProducts = []; // every product that should be listed
+let pendingSupplies = [];  // supplies the admin sent that the supplier has not confirmed yet: [{ id, items, sentDate }]
+let openingIsSuppliedTotal = false; // brand-new location: no live stock yet, so the opening IS the supplied total (it already holds the first supply)
 
 function dayOfWeekFromDateStr(dateStr) {
   return new Date(dateStr + 'T12:00:00').getDay();
@@ -208,6 +228,9 @@ function endOfDateMs(dateStr) { return Date.parse(dateStr + 'T23:59:59.999Z'); }
 // Which day an event belongs to: the supplier-stated delivery date when there is one, otherwise the day of the event itself.
 function eventDay(e) { return e.deliveredDate || eventDateStr(e.ts); }
 
+// The real moment the stock changed on the live record: the supplier's tap for supplies, the event time for everything else.
+function eventTapMs(e) { return e.tapTs != null ? e.tapTs : e.ts; }
+
 // Which part of an event was NOT yet inside the last real report's closing count? Returns the amounts still to add.
 //  - delivered on a later day than the report            -> not in the count, add it all
 //  - delivered on an earlier day than the report         -> her count already includes it, add nothing
@@ -217,6 +240,17 @@ function eventDay(e) { return e.deliveredDate || eventDateStr(e.ts); }
 //        otherwise they were already inside her figures.
 //  - supplies without a stated delivery date, corrections and admin adds -> compared by their exact time.
 function remainingDelta(e, log) {
+  // A report sent under the checked-opening rule: at the exact moment she sent it, her opening was proven equal to the live stock,
+  // so every supply the supplier confirmed BEFORE that moment is inside her figures and every one confirmed AFTER it is not.
+  if (!log.backfilled && log.openingVerified && log.submittedAt && log.submittedAt.toMillis) {
+    return eventTapMs(e) > log.submittedAt.toMillis() ? e.delta : {};
+  }
+  // A backfilled day used everything dated up to that day that was confirmed BEFORE it was filled in. Anything confirmed
+  // after that moment (even if dated on/before that day) is not in its figures; anything dated after that day never was.
+  if (log.backfilled && log.backfillRule === 'capped' && log.submittedAt && log.submittedAt.toMillis) {
+    if (eventDay(e) > log.date) return e.delta;
+    return eventTapMs(e) > log.submittedAt.toMillis() ? e.delta : {};
+  }
   const cutoff = baselineCutoffMs(log);
   if (!e.deliveredDate) return e.ts > cutoff ? e.delta : {};
   if (e.deliveredDate > log.date) return e.delta;
@@ -336,6 +370,100 @@ function computeBackfillDay(dateStr) {
   return { date: dateStr, opening, carried, received, products };
 }
 
+// ===== LIVE STOCK vs WHAT THE FORM SHOWS =====
+// The live stock only moves when the supplier taps Confirm Delivered (or the admin edits stock). So before a report is
+// accepted we re-read the live stock and make sure it is exactly what the form was opened with.
+function deriveOpening(ld) {
+  return (ld && ld.currentStock && Object.keys(ld.currentStock).length > 0) ? ld.currentStock : ((ld && ld.products) || {});
+}
+function sameStock(a, b) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  for (const k of keys) { if ((Number(a && a[k]) || 0) !== (Number(b && b[k]) || 0)) return false; }
+  return true;
+}
+function stockChangedAlert() {
+  alert('Your location\'s stock changed while this page was open (a supply was confirmed or the admin updated stock).\n\nThe page will now reload so your opening stock is correct. Please enter your figures again.');
+  window.location.reload();
+}
+
+// Supplies the admin sent that the supplier has not confirmed yet. They are not in the live stock, so they are not in the opening stock.
+async function loadPendingSupplies() {
+  const snap = await db.collection('supplyRequests')
+    .where('locationId', '==', session.locationId)
+    .where('status', '==', 'pending_confirmation').get();
+  const out = [];
+  snap.forEach(doc => {
+    const d = doc.data();
+    const items = {};
+    for (const [p, q] of Object.entries(d.items || {})) { const n = Number(q) || 0; if (n > 0) items[p] = n; }
+    if (!Object.keys(items).length) return;
+    const sent = d.createdAt && d.createdAt.toDate ? d.createdAt.toDate() : null;
+    out.push({ id: doc.id, items, sentDate: sent ? todayStr(sent) : '' });
+  });
+  out.sort((a, b) => (a.sentDate < b.sentDate ? -1 : a.sentDate > b.sentDate ? 1 : (a.id < b.id ? -1 : 1)));
+  return out;
+}
+
+function renderPendingSupplyCard() {
+  const card = document.getElementById('pendingSupplyCard');
+  if (!card) return;
+  if (!pendingSupplies.length) { card.classList.add('hidden'); return; }
+  document.getElementById('pendingSupplyList').innerHTML = pendingSupplies.map(s => {
+    const when = s.sentDate ? new Date(s.sentDate + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
+    const lines = Object.entries(s.items).map(([p, q]) => `<div class="flex-between" style="font-size:0.9rem; padding:2px 0;"><span>${sanitizeHtml(p)}</span><strong>${q}</strong></div>`).join('');
+    return `<div style="padding:8px 0; border-bottom:1px solid var(--light-gray);"><div style="font-size:0.78rem; color:var(--gray); margin-bottom:2px;">Sent by admin ${when}</div>${lines}</div>`;
+  }).join('');
+  document.getElementById('pendingSupplyAck').checked = false;
+  document.getElementById('pendingSupplyError').classList.add('hidden');
+  card.classList.remove('hidden');
+}
+function sanitizeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+
+// Shows today's form: loads any supply still waiting for the supplier, then draws the opening stock.
+async function prepareToday() {
+  try { pendingSupplies = openingIsSuppliedTotal ? [] : await loadPendingSupplies(); } catch (e) { console.error(e); pendingSupplies = []; }
+  renderPendingSupplyCard();
+  renderForms();
+}
+
+// Run when she taps Calculate & Submit, before anything is accepted.
+async function verifyBeforeSubmit() {
+  const errEl = document.getElementById('pendingSupplyError');
+  try {
+    const locSnap = await db.collection('locations').doc(session.locationId).get();
+    if (!sameStock(deriveOpening(locSnap.data() || {}), openingStock)) { stockChangedAlert(); return false; }
+
+    const fresh = openingIsSuppliedTotal ? [] : await loadPendingSupplies();
+    const sameList = fresh.length === pendingSupplies.length && fresh.every((s, i) => s.id === pendingSupplies[i].id);
+    if (!sameList) {
+      // A supply was sent or handled while this page was open — show the up-to-date list and ask again
+      pendingSupplies = fresh;
+      renderPendingSupplyCard();
+      if (fresh.length) {
+        errEl.textContent = 'A supply waiting for the supplier has changed since you opened this page. Please read the card above, then submit again.';
+        errEl.classList.remove('hidden');
+        document.getElementById('pendingSupplyCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        alert('The supplier has handled the waiting supply. Please press OK, then tap Calculate & Submit again.');
+        window.location.reload();
+      }
+      return false;
+    }
+    if (pendingSupplies.length && !document.getElementById('pendingSupplyAck').checked) {
+      errEl.textContent = 'A supply sent to you is still waiting for the supplier. Ask the supplier to tap Confirm Delivered and press Refresh — or, if it has not reached your fridge yet, tick the box above.';
+      errEl.classList.remove('hidden');
+      document.getElementById('pendingSupplyCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return false;
+    }
+    errEl.classList.add('hidden');
+    return true;
+  } catch (e) {
+    console.error(e);
+    alert('Could not check your stock. Check your connection and try again.');
+    return false;
+  }
+}
+
 async function init() {
   try {
     const locDoc = await db.collection('locations').doc(session.locationId).get();
@@ -347,6 +475,7 @@ async function init() {
     openingStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
       ? locationData.currentStock
       : suppliedStock;
+    openingIsSuppliedTotal = !(locationData.currentStock && Object.keys(locationData.currentStock).length > 0);
 
     if (Object.keys(openingStock).length === 0) {
       document.getElementById('loadingMsg').innerHTML = '<div class="alert warn">No products have been supplied to you yet by the admin.</div>';
@@ -397,7 +526,7 @@ async function init() {
     // Nothing missing — show the permanent status card in its greyed-out, inactive state
     document.getElementById('backfillStatusCard').classList.remove('hidden');
 
-    renderForms();
+    await prepareToday();
     document.getElementById('loadingMsg').classList.add('hidden');
     document.getElementById('mainContent').classList.remove('hidden');
   } catch(e) {
@@ -534,9 +663,10 @@ async function submitBackfillReport() {
       const fresh = await locRef.get();
       const fd = fresh.data() || {};
       openingStock = (fd.currentStock && Object.keys(fd.currentStock).length > 0) ? fd.currentStock : (fd.products || {});
+      openingIsSuppliedTotal = !(fd.currentStock && Object.keys(fd.currentStock).length > 0);
       document.getElementById('backfillBanner').classList.add('hidden');
       document.getElementById('backfillStatusCard').classList.remove('hidden');
-      renderForms();
+      await prepareToday();
       document.getElementById('mainContent').classList.remove('hidden');
     }
   } catch(e) {
@@ -578,7 +708,10 @@ function sanitize(s) { return s.replace(/[^a-zA-Z0-9]/g, '_'); }
 
 let confirmTimerInterval = null;
 
-function calculateAndSubmit() {
+async function calculateAndSubmit() {
+  // First make sure the opening stock on screen is still the real live stock and no supply is being skipped
+  if (!(await verifyBeforeSubmit())) return;
+
   const closingStock = {}, soldQty = {}, discrepancies = {}, lowStockItems = {};
   let hasDiscrepancy = false;
 
@@ -775,8 +908,8 @@ async function submitWithReason() {
   const notes = document.getElementById('discrepancyNotes').value.trim();
   const fullReason = notes ? reason + ' | Notes: ' + notes : reason;
 
-  await saveLog('flagged', fullReason, expiredData, leakingData);
-  await sendDiscrepancyNotification(fullReason, expiredData, leakingData);
+  const saved = await saveLog('flagged', fullReason, expiredData, leakingData);
+  if (saved) await sendDiscrepancyNotification(fullReason, expiredData, leakingData);
 }
 
 async function sendDiscrepancyNotification(reason, expired, leaking) {
@@ -798,21 +931,32 @@ async function saveLog(status, discrepancyReason, expiredData, leakingData) {
     openingStock, closingStock, soldQty, discrepancy: discrepancies,
     discrepancyReason: discrepancyReason || '', lowStockItems,
     hasLowStock: Object.keys(lowStockItems).length > 0, status,
+    openingVerified: true,                                   // opening was proven equal to the live stock at the moment of sending
+    pendingSupplyIds: pendingSupplies.map(s => s.id),        // supplies she confirmed had NOT reached her yet (still waiting for the supplier)
     submittedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
   if (expiredData) payload.expiry = expiredData;
   if (leakingData) payload.leakage = leakingData;
   try {
-    await logRef.set(payload, { merge: true });
-    await locRef.update({ currentStock: closingStock });
+    // One atomic step: re-check the live stock, save the report and set the new live stock.
+    // If the supplier confirmed a delivery (or the admin changed stock) after this page was opened, nothing is saved.
+    await db.runTransaction(async (t) => {
+      const locSnap = await t.get(locRef);
+      if (!sameStock(deriveOpening(locSnap.data() || {}), openingStock)) throw new Error('STOCK_CHANGED');
+      t.set(logRef, payload, { merge: true });
+      t.update(locRef, { currentStock: closingStock });
+    });
     if (Object.keys(lowStockItems).length > 0) await sendLowStockNotification(lowStockItems);
     document.getElementById('discrepancyCard').classList.add('hidden');
     document.getElementById('successMsg').classList.remove('hidden');
     document.getElementById('successMsg').scrollIntoView({ behavior: 'smooth' });
     document.querySelectorAll('input, textarea, button, select').forEach(el => el.disabled = true);
+    return true;
   } catch (e) {
+    if (e && e.message === 'STOCK_CHANGED') { stockChangedAlert(); return false; }
     alert('Failed to submit. Check your connection and try again.');
     console.error(e);
+    return false;
   }
 }
 
