@@ -91,7 +91,14 @@ function eventDay(e) { return e.deliveredDate || eventDateStr(e.ts); }
 //        shown did not include the supply AND her closing count did not rise by it, the bottles came after her count, so add them;
 //        otherwise they were already inside her figures.
 //  - supplies without a stated delivery date, corrections and admin adds -> compared by their exact time.
+function eventTapMs(e) { return e.tapTs != null ? e.tapTs : e.ts; }
+
 function remainingDelta(e, log) {
+  // Report sent under the checked-opening rule: its opening was proven equal to the live stock at the moment it was sent,
+  // so supplies confirmed before that moment are inside her count and supplies confirmed after it are not.
+  if (!log.backfilled && log.openingVerified && log.submittedAt && log.submittedAt.toMillis) {
+    return eventTapMs(e) > log.submittedAt.toMillis() ? e.delta : {};
+  }
   const cutoff = cutoffMs(log);
   if (!e.deliveredDate) return e.ts > cutoff ? e.delta : {};
   if (e.deliveredDate > log.date) return e.delta;
