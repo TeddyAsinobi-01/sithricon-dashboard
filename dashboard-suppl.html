@@ -240,37 +240,28 @@ async function submitDeliveryDate() {
 
 async function finishConfirmDelivery(requestId, deliveredOn, enteredBySupplier) {
   const reqRef = db.collection('supplyRequests').doc(requestId);
-  let handled = false;
-  try {
-    // One atomic step: re-check the request, add the bottles to the live stock and mark the supply confirmed.
-    // Atomic so it can never clash with the merchandiser sending her report at the same moment.
-    await db.runTransaction(async (t) => {
-      const reqSnap = await t.get(reqRef);
-      const req = reqSnap.data();
-      if (!req || (req.status !== 'pending_confirmation' && req.status !== 'disputed')) { handled = true; return; }
-
-      const locRef = db.collection('locations').doc(req.locationId);
-      const locSnap = await t.get(locRef);
-      const current = { ...(locSnap.data().currentStock || locSnap.data().products || {}) };
-      for (const [p, q] of Object.entries(req.items)) current[p] = (current[p] || 0) + q;
-
-      t.update(locRef, { currentStock: current });
-      t.update(reqRef, {
-        status: 'confirmed',
-        confirmedBySupplier: true,
-        confirmedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        deliveredOn,                                   // the day the stock really reached the fridge
-        confirmedLate: deliveredOn < todayStr(),
-        deliveryDateEnteredBySupplier: !!enteredBySupplier
-      });
-    });
-  } catch (e) {
-    console.error(e);
-    alert('Could not confirm this supply. Check your connection and try again.');
+  const reqSnap = await reqRef.get();
+  const req = reqSnap.data();
+  if (!req || (req.status !== 'pending_confirmation' && req.status !== 'disputed')) {
+    alert('This supply has already been handled.');
     return;
   }
 
-  if (handled) { alert('This supply has already been handled.'); return; }
+  const locRef = db.collection('locations').doc(req.locationId);
+  const locSnap = await locRef.get();
+  const current = { ...(locSnap.data().currentStock || locSnap.data().products || {}) };
+  for (const [p, q] of Object.entries(req.items)) current[p] = (current[p] || 0) + q;
+
+  await locRef.update({ currentStock: current });
+  await reqRef.update({
+    status: 'confirmed',
+    confirmedBySupplier: true,
+    confirmedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    deliveredOn,                                   // the day the stock really reached the fridge
+    confirmedLate: deliveredOn < todayStr(),
+    deliveryDateEnteredBySupplier: !!enteredBySupplier
+  });
+
   alert('Supply confirmed! Stock has been updated.');
 }
 

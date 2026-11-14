@@ -57,6 +57,9 @@
     <!-- Notification sub-tabs -->
     <div class="tabs" style="margin-bottom:10px;">
       <div class="tab active" data-notif-tab="discrepancy">⚠️ Discrepancy <span id="discrepancyBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+      <div class="tab" data-notif-tab="supplyrequest">📋 Supply Request <span id="supplyRequestBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+      <div class="tab" data-notif-tab="supply">📦 Supply Issue <span id="supplyBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
+      <div class="tab" data-notif-tab="expiry">🕒 Expiry <span id="expiryBadge" class="badge red hidden" style="font-size:0.7rem; padding:2px 6px; margin-left:4px;">0</span></div>
     </div>
 
     <div id="notif-discrepancy" class="notif-tab-content">
@@ -64,7 +67,52 @@
       <div id="discrepancyList"></div>
     </div>
 
+    <!-- Supply Request tab: daily restock list -->
+    <div id="notif-supplyrequest" class="notif-tab-content hidden">
+      <div id="restockSummaryCard" class="card hidden" style="border:2px solid var(--yellow);">
+        <div class="flex-between" style="margin-bottom:10px;">
+          <h2 style="margin:0; color:#856404;">📋 Restock List</h2>
+          <span style="font-size:0.8rem; color:var(--gray);" id="restockDate"></span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">Locations reporting low stock today:</p>
+        <div id="restockListItems"></div>
+        <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+          <button class="btn yellow" id="sendRestockBtn" onclick="sendRestockToWhatsApp()">📲 Send to WhatsApp</button>
+          <button class="btn small outline" onclick="copyRestockList()">📋 Copy List</button>
+        </div>
+        <div style="margin-top:12px;">
+          <label>WhatsApp Number <span style="font-weight:400; color:var(--gray);">(with country code)</span></label>
+          <div class="flex">
+            <input type="tel" id="waNumberInline" placeholder="e.g. 2348012345678" style="margin-bottom:0;">
+            <button class="btn small yellow" onclick="saveWaNumber()">Save</button>
+          </div>
+          <div id="waNumSavedMsg" class="alert success hidden" style="margin-top:6px;">Number saved.</div>
+        </div>
+      </div>
+      <div id="restockSentCard" class="card hidden" style="opacity:0.6; transition:opacity 0.4s;">
+        <div class="flex-between">
+          <h2 style="margin:0; color:var(--green-dark);">✅ Restock List Sent</h2>
+          <span style="font-size:0.8rem; color:var(--gray);" id="restockSentDate"></span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--gray); margin-top:8px;">
+          Today's restock list has been sent. A new list will build up as merchandisers submit their reports for tomorrow.
+        </p>
+      </div>
+      <div class="empty-state" id="restockEmpty">No restock requests yet today.</div>
+    </div>
 
+    <div id="notif-supply" class="notif-tab-content hidden">
+      <div class="empty-state" id="supplyEmpty">No supply issue notifications.</div>
+      <div id="supplyList"></div>
+    </div>
+    <div id="notif-expiry" class="notif-tab-content hidden">
+      <div class="card" style="margin-bottom:12px;">
+        <h3>Report Expired Products</h3>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">Expired product reports are now submitted as part of a discrepancy report and appear under the ⚠️ Discrepancy tab, and in Reports & History → Expired & Leaking.</p>
+      </div>
+      <div class="empty-state" id="expiryEmpty">No expiry reports yet.</div>
+      <div id="expiryList"></div>
+    </div>
   </div>
 
   <!-- LOCATIONS TAB -->
@@ -487,7 +535,6 @@ document.querySelectorAll('.container.wide > .tabs > .tab').forEach(tab => {
 // Sub-tabs inside Reports
 document.querySelectorAll('.tab-content .tabs .tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    if (!tab.dataset.subtab) return; // notification sub-tabs have their own handler
     const parent = tab.closest('.tabs');
     parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
@@ -633,20 +680,18 @@ document.querySelectorAll('[data-notif-tab]').forEach(tab => {
     document.querySelectorAll('[data-notif-tab]').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.notif-tab-content').forEach(c => c.classList.add('hidden'));
     tab.classList.add('active');
-    const panel = document.getElementById(`notif-${tab.dataset.notifTab}`);
-    if (panel) panel.classList.remove('hidden');
+    document.getElementById(`notif-${tab.dataset.notifTab}`).classList.remove('hidden');
   });
 });
 
 function setupRealtimeNotifications() {
   db.collection('notifications').orderBy('createdAt', 'desc').limit(100).onSnapshot(snap => {
-    const discrepancyItems = [];
+    const discrepancyItems = [], supplyItems = [], expiryItems = [];
     let unread = 0;
 
     snap.forEach(doc => {
       const n = doc.data();
-      // Only notifications that are still shown in this tab count towards the bell
-      if (!n.read && n.type === 'discrepancy') unread++;
+      if (!n.read) unread++;
       const time = n.createdAt ? new Date(n.createdAt.toDate()).toLocaleString('en-GB') : (n.date || '');
       const markBtn = !n.read ? `<button class="btn small outline" style="margin-top:8px;" onclick="markRead('${doc.id}')">Mark as read</button>` : '';
       const readCls = n.read ? 'read' : '';
@@ -668,6 +713,35 @@ function setupRealtimeNotifications() {
         }
         // Still mark as read automatically since it's now represented in the restock list, not as a discrete notification
         if (!n.read) db.collection('notifications').doc(doc.id).update({ read: true }).catch(() => {});
+      } else if (n.type === 'supply_disputed' || n.type === 'supply_cancelled') {
+        let itemLines, title;
+        if (n.type === 'supply_cancelled') {
+          itemLines = Object.entries(n.items || {}).map(([p, q]) => `<li>${p}: ${q} units</li>`).join('');
+          title = `❌ Supplier Reported Issue — ${n.locationName}`;
+        } else {
+          itemLines = Object.entries(n.items || {}).map(([p, q]) => {
+            const rec = n.merchandiserReceivedItems?.[p];
+            return `<li>${p}: Admin recorded ${q}${rec != null ? `, received ${rec}` : ''}</li>`;
+          }).join('');
+          title = `❌ Supply Disputed — ${n.locationName}`;
+        }
+        supplyItems.push(`
+          <div class="notif-item ${n.read ? 'read' : ''}" id="notif-${doc.id}">
+            <div style="font-weight:700; margin-bottom:6px;">${title}</div>
+            <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
+            ${n.disputeNote ? `<div style="font-size:0.85rem; color:#555; margin-top:4px;"><strong>Note:</strong> ${n.disputeNote}</div>` : ''}
+            ${n.details ? `<div style="font-size:0.85rem; color:#555; margin-top:4px;"><strong>Issue:</strong> ${n.issueLabel || ''} — ${n.details}</div>` : ''}
+            ${n.type === 'supply_cancelled' ? `<div style="font-size:0.8rem; color:var(--gray); margin-top:4px;">Go to Supply Stock tab → Pending/Disputed Supply Requests to correct or cancel.</div>` : ''}
+            <div class="notif-time">${time}</div>${markBtn}
+          </div>`);
+      } else if (n.type === 'expiry') {
+        const itemLines = Object.entries(n.expiryItems || {}).map(([p, qty]) => `<li><strong>${p}</strong>: ${qty} units expired</li>`).join('');
+        expiryItems.push(`
+          <div class="notif-item ${readCls}" style="border-left-color:#795548; background:#fdf6ee;" id="notif-${doc.id}">
+            <div style="font-weight:700; margin-bottom:6px;">🕒 Expiry Report — ${n.locationName}</div>
+            <ul style="margin-left:16px; font-size:0.9rem;">${itemLines}</ul>
+            <div class="notif-time">${time}</div>${markBtn}
+          </div>`);
       }
     });
 
@@ -677,6 +751,16 @@ function setupRealtimeNotifications() {
     discEl.innerHTML = discrepancyItems.join('');
     discEmpty.classList.toggle('hidden', discrepancyItems.length > 0);
 
+    const supEl = document.getElementById('supplyList');
+    const supEmpty = document.getElementById('supplyEmpty');
+    supEl.innerHTML = supplyItems.join('');
+    supEmpty.classList.toggle('hidden', supplyItems.length > 0);
+
+    const expEl = document.getElementById('expiryList');
+    const expEmpty = document.getElementById('expiryEmpty');
+    expEl.innerHTML = expiryItems.join('');
+    expEmpty.classList.toggle('hidden', expiryItems.length > 0);
+
     // Update badges
     const setBadge = (id, count) => {
       const el = document.getElementById(id);
@@ -685,6 +769,8 @@ function setupRealtimeNotifications() {
       el.classList.toggle('hidden', count === 0);
     };
     setBadge('discrepancyBadge', discrepancyItems.filter(i => !i.includes('read')).length);
+    setBadge('supplyBadge', supplyItems.filter(i => !i.includes('read')).length);
+    setBadge('expiryBadge', expiryItems.filter(i => !i.includes('read')).length);
 
     const countEl = document.getElementById('notifCount');
     const dotEl = document.getElementById('notifTabDot');
@@ -881,10 +967,116 @@ async function getCarriedOverLocations(todayDateStr) {
   return carried;
 }
 
+let currentRestockListDoc = null;
+
+function watchTodayRestockList() {
+  const today = todayStr();
+  db.collection('restockLists').doc(today).onSnapshot(doc => {
+    currentRestockListDoc = doc.exists ? { id: doc.id, ...doc.data() } : null;
+    renderRestockCard();
+  });
+}
+
+function renderRestockCard() {
+  const pendingCard = document.getElementById('restockSummaryCard');
+  const sentCard = document.getElementById('restockSentCard');
+  const emptyEl = document.getElementById('restockEmpty');
+  const listEl = document.getElementById('restockListItems');
+  const dateEl = document.getElementById('restockDate');
+  const badgeEl = document.getElementById('supplyRequestBadge');
+
+  if (!currentRestockListDoc || !currentRestockListDoc.locations || currentRestockListDoc.locations.length === 0) {
+    pendingCard.classList.add('hidden');
+    sentCard.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+    if (badgeEl) badgeEl.classList.add('hidden');
+    return;
+  }
+
+  emptyEl.classList.add('hidden');
+
+  if (currentRestockListDoc.status === 'sent') {
+    pendingCard.classList.add('hidden');
+    sentCard.classList.remove('hidden');
+    document.getElementById('restockSentDate').textContent = 'as of ' + new Date().toLocaleDateString('en-GB');
+    if (badgeEl) badgeEl.classList.add('hidden');
+    return;
+  }
+
+  if (badgeEl) {
+    badgeEl.textContent = currentRestockListDoc.locations.length;
+    badgeEl.classList.remove('hidden');
+  }
+
+  sentCard.classList.add('hidden');
+  pendingCard.classList.remove('hidden');
+  dateEl.textContent = 'as of ' + new Date().toLocaleDateString('en-GB');
+
+  listEl.innerHTML = currentRestockListDoc.locations.map(loc => `
+    <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--light-gray);">
+      <div style="font-weight:700; color:var(--green-dark); margin-bottom:4px;">
+        📍 ${loc.locationName}
+        ${loc.carriedFromYesterday
+          ? '<span class="badge red" style="font-size:0.7rem; margin-left:6px;">Not supplied yesterday</span>'
+          : '<span class="badge yellow" style="font-size:0.7rem; margin-left:6px;">Low today</span>'}
+      </div>
+      ${Object.entries(loc.items || {}).map(([product, d]) => `
+        <div style="display:flex; justify-content:space-between; font-size:0.9rem; padding:3px 0;">
+          <span>${product}</span>
+          <span style="color:var(--red); font-weight:600;">${d.closing} left (threshold ${d.threshold})</span>
+        </div>`).join('')}
+    </div>`).join('');
+
+  db.collection('admin').doc('settings').get().then(doc => {
+    if (doc.exists && doc.data().whatsappNumber) document.getElementById('waNumberInline').value = doc.data().whatsappNumber;
+  });
+}
+
+function buildRestockText() {
+  const date = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+  let text = `*ITHRI FRESH JUICE — RESTOCK REQUEST*\n📅 ${date}\n\n`;
+  (currentRestockListDoc?.locations || []).forEach(loc => {
+    text += `📍 *${loc.locationName}*${loc.carriedFromYesterday ? ' (not supplied yesterday)' : ''}\n`;
+    Object.entries(loc.items || {}).forEach(([product, d]) => {
+      text += `  • ${product}: ${d.closing} units remaining (threshold ${d.threshold})\n`;
+    });
+    text += '\n';
+  });
+  text += '_Please arrange restock for the above locations._';
+  return text;
+}
+
+async function sendRestockToWhatsApp() {
+  let number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
+  if (!number) { alert('Please enter a WhatsApp number first.'); return; }
+  if (!currentRestockListDoc || !currentRestockListDoc.locations?.length) { alert('No restock list to send.'); return; }
+
+  window.open(`https://wa.me/${number}?text=${encodeURIComponent(buildRestockText())}`, '_blank');
+
+  // Mark today's list as sent (fades the card). The supplyNeededRecords history was already
+  // written incrementally as each low-stock report came in — no need to write it again here.
+  const today = todayStr();
+  await db.collection('restockLists').doc(today).update({
+    status: 'sent', sentAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+async function copyRestockList() {
+  try { await navigator.clipboard.writeText(buildRestockText()); alert('Restock list copied!'); }
+  catch(e) { alert('Could not copy.'); }
+}
+async function saveWaNumber() {
+  const number = document.getElementById('waNumberInline').value.trim().replace(/\D/g, '');
+  if (!number) return;
+  await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
+  document.getElementById('waNumberSettings').value = number;
+  const msg = document.getElementById('waNumSavedMsg');
+  msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
+}
 async function saveWaNumberFromSettings() {
   const number = document.getElementById('waNumberSettings').value.trim().replace(/\D/g, '');
   if (!number) { alert('Please enter a number.'); return; }
   await db.collection('admin').doc('settings').set({ whatsappNumber: number }, { merge: true });
+  document.getElementById('waNumberInline').value = number;
   const msg = document.getElementById('waSettingsSavedMsg');
   msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 3000);
 }
@@ -1911,6 +2103,7 @@ setupRealtimeOverview();
 setupRealtimeNotifications();
 setDefaultDateFilters();
 loadGlobalProducts();
+watchTodayRestockList();
 </script>
 </body>
 </html>
