@@ -192,6 +192,13 @@ async function auditLocation(loc, from, to) {
   const days = [];
   const rows = [];
 
+  // Cheap first look: only this location's backfilled days. If none fall in the window there is nothing to audit,
+  // so the 75 days of full logs below are never read for it.
+  const bfSnap = await db.collection('locations').doc(loc.id).collection('logs').where('backfilled', '==', true).get();
+  let hasBackfillInWindow = false;
+  bfSnap.forEach(doc => { const d = doc.data(); if (d.date && d.date >= from && d.date <= to) hasBackfillInWindow = true; });
+  if (!hasBackfillInWindow) return { days, rows };
+
   // Pull logs from 45 days before the window so there is a real report to anchor on
   const logSnap = await db.collection('locations').doc(loc.id).collection('logs')
     .where('date', '>=', shiftDate(from, -45)).where('date', '<=', to).get();

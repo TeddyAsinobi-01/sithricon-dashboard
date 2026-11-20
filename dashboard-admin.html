@@ -1275,18 +1275,17 @@ async function loadReports() {
 
   for (const loc of locationsToQuery) {
     try {
-      // Fetch recent logs (no range filter on server to avoid missing Firestore index errors)
-      // Then filter by date client-side — more reliable
-      const snap = await db.collection('locations').doc(loc.id)
-        .collection('logs')
-        .orderBy('date', 'desc')
-        .limit(120)
-        .get();
+      // Ask Firestore only for the chosen dates (the same query the Spoilage report already uses), so a short
+      // date range costs only the days inside it instead of the last 120 logs of every location.
+      let logQuery = db.collection('locations').doc(loc.id).collection('logs').orderBy('date', 'desc');
+      if (fromDate) logQuery = logQuery.where('date', '>=', fromDate);
+      if (toDate) logQuery = logQuery.where('date', '<=', toDate);
+      const snap = await logQuery.limit(120).get();
 
       snap.forEach(doc => {
         const d = doc.data();
         const logDate = d.date || '';
-        // Client-side date filter
+        // Safety check on screen as well
         if (fromDate && logDate < fromDate) return;
         if (toDate && logDate > toDate) return;
         allEntries.push({ loc, d });
