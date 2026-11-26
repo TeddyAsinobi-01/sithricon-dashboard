@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ithri - Stock & Sales</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body class="has-bottom-nav">
+<header class="app-header">
+  <h1><span class="logo-mark">Ithri</span> Stock & Sales</h1>
+  <span style="font-size:0.8rem; cursor:pointer;" onclick="window.location.href='dashboard-merch.html'">Home</span>
+</header>
+
+<div class="container">
+
+  <div id="loadingMsg" class="card"><p>Loading today's products...</p></div>
+
+  <!-- Permanent status card: greyed out / inactive when no reports are missing -->
+  <div id="backfillStatusCard" class="card hidden" style="opacity:0.55; border:2px dashed #ccc; cursor:not-allowed;">
+    <h3 style="color:var(--gray); margin-bottom:6px;">📅 Missed Report Check</h3>
+    <p style="font-size:0.85rem; color:var(--gray);">✅ All days accounted for. Nothing to submit here.</p>
+  </div>
+
+  <!-- Mandatory backfill: any missed working day's report must be submitted before today's form -->
+  <div id="backfillBanner" class="card hidden" style="border:2px solid #1565C0;">
+    <h3 style="color:#0d47a1; margin-bottom:8px;">📅 Please Submit Your Missed Report First</h3>
+    <p id="backfillProgress" style="font-size:0.78rem; color:#1565C0; font-weight:600; margin-bottom:6px;"></p>
+    <p style="font-size:0.85rem; color:var(--gray); margin-bottom:12px;">
+      No report was sent for <strong id="backfillDateLabel">that day</strong>. Before you can continue, please enter what you sold on <strong id="backfillDateLabel2">that day</strong> so your sales records stay accurate.
+    </p>
+    <div class="alert warn" style="margin-bottom:12px; font-size:0.85rem;">
+      <strong>🧊 What was in the fridge on <span id="backfillDateLabel3">that day</span></strong><br>
+      These figures are worked out from your last submitted report plus supplies delivered up to and including that day. Supplies delivered <u>after</u> that day are not counted for it, and you cannot report selling more than was in the fridge. If a figure looks wrong, please tell the admin.
+    </div>
+    <div class="card" style="background:var(--light-gray); margin-bottom:12px;">
+      <h3 style="margin-bottom:8px;">Fridge Stock on <span id="backfillDateLabel4">that day</span></h3>
+      <div id="backfillOpeningList"></div>
+    </div>
+    <div id="backfillSoldInputs"></div>
+    <button class="btn yellow" onclick="submitBackfillReport()">Submit Missed Report</button>
+    <div id="backfillError" class="alert error hidden" style="margin-top:10px;"></div>
+  </div>
+
+  <div id="mainContent" class="hidden">
+    <!-- Supplies the admin sent that the supplier has not confirmed yet: they are NOT in the opening stock below -->
+    <div id="pendingSupplyCard" class="card hidden" style="border:2px solid #f0ad00;">
+      <h2 style="color:#856404;">⏳ Supply Waiting for the Supplier</h2>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+        The admin sent the supply below to your location, but the supplier has not tapped <strong>Confirm Delivered</strong> yet, so it is <u>not</u> in your opening stock.
+      </p>
+      <div id="pendingSupplyList" style="margin-bottom:10px;"></div>
+      <div class="alert warn" style="font-size:0.85rem; margin-bottom:10px;">
+        <strong>Already received it?</strong> Ask the supplier to tap <strong>Confirm Delivered</strong> now, then press Refresh. Your opening stock will then include it and your report will balance.
+      </div>
+      <button class="btn small outline" onclick="window.location.reload()">🔄 Refresh stock</button>
+      <label style="margin-top:12px; display:block;">
+        <input type="checkbox" id="pendingSupplyAck" style="width:auto; margin-right:6px;">
+        Nothing listed above has reached my fridge yet
+      </label>
+      <div id="pendingSupplyError" class="alert error hidden" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Today's Opening Stock</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Current available stock carried forward from previous reports and admin supplies.</p>
+      <div id="openingStockList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Enter Closing Stock</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Count what is physically left at the end of the day.</p>
+      <div id="closingStockInputs"></div>
+    </div>
+
+    <div class="card">
+      <h2>Enter Total Sold</h2>
+      <p style="color:var(--gray); font-size:0.85rem; margin-bottom:10px;">Enter how many of each product you sold today.</p>
+      <div id="soldInputs"></div>
+    </div>
+
+    <button class="btn yellow" onclick="calculateAndSubmit()">Calculate & Submit</button>
+
+    <!-- Confirmation card: review before final send -->
+    <div id="confirmCard" class="card hidden" style="border:2px solid var(--green-main); margin-top:16px;">
+      <h2 style="color:var(--green-dark);">✅ Please Confirm Your Report</h2>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">Review what you entered below. If anything looks wrong, tap "Make Correction" to go back and fix it.</p>
+      <div id="confirmDetails" style="margin-bottom:12px;"></div>
+
+      <!-- Extra confirmation shown only when any product sold > 20 -->
+      <div id="highQtyConfirm" class="hidden alert warn" style="margin-bottom:12px;">
+        <strong>⚠️ Large sale detected.</strong> You reported more than 20 bottles sold for one or more products. Please double-check the figures below are correct.
+        <div id="highQtyList" style="margin-top:6px; font-size:0.9rem;"></div>
+        <label style="margin-top:10px;">
+          <input type="checkbox" id="highQtyAck" style="width:auto; margin-right:6px;" onchange="handleHighQtyAck()">
+          I confirm these large quantities are correct
+        </label>
+      </div>
+
+      <div class="flex" style="margin-top:10px;">
+        <button class="btn outline" onclick="makeCorrection()">✏️ Make Correction</button>
+        <button class="btn yellow" id="finalSendBtn" onclick="finalizeSend()" disabled>Send Report (10s)</button>
+      </div>
+    </div>
+
+    <div id="discrepancyCard" class="card hidden" style="border:2px solid var(--red); margin-top:16px;">
+      <h2 style="color:var(--red);">⚠️ Discrepancy Detected</h2>
+      <div id="discrepancyDetails"></div>
+
+      <label style="margin-top:12px;">Reason Type</label>
+      <select id="discrepancyType" onchange="handleDiscrepancyTypeChange()" style="margin-bottom:10px;">
+        <option value="">-- Select reason --</option>
+        <option value="expired">🕒 Expired products</option>
+        <option value="leaking">💧 Leaking products</option>
+        <option value="other">📝 Other</option>
+      </select>
+
+      <!-- Expired: forces the merchandiser down to the dedicated Expired card -->
+      <div id="expiredRedirect" class="hidden alert warn" style="margin-top:6px;">
+        Please scroll down and use the <strong>🕒 Report Expired Products</strong> card below to enter the number of expired bottles per product, then come back here to finish submitting.
+        <button class="btn small outline" style="margin-top:8px;" onclick="scrollToCard('expiredCard')">Go to Expired Products card</button>
+      </div>
+
+      <!-- Leaking: forces the merchandiser down to the dedicated Leaking card -->
+      <div id="leakingRedirect" class="hidden alert warn" style="margin-top:6px;">
+        Please scroll down and use the <strong>💧 Report Leaking Products</strong> card below to enter the number of affected bottles per product, then come back here to finish submitting.
+        <button class="btn small outline" style="margin-top:8px;" onclick="scrollToCard('leakingCard')">Go to Leaking Products card</button>
+      </div>
+
+      <!-- Other reason -->
+      <div id="otherReasonInput" class="hidden">
+        <label>Please explain</label>
+        <textarea id="discrepancyReason" rows="3" placeholder="e.g. 3 bottles sold while I was at lunch..."></textarea>
+      </div>
+
+      <label style="margin-top:6px;">Additional notes (optional)</label>
+      <textarea id="discrepancyNotes" rows="2" placeholder="Any extra details for the admin..."></textarea>
+
+      <button class="btn danger" id="submitDiscrepancyBtn" onclick="submitWithReason()">Submit Explanation</button>
+      <div id="discrepancyBlockedMsg" class="alert error hidden" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- Expired & Leaking cards side by side -->
+    <div class="flex" style="gap:16px; margin-top:16px; align-items:stretch; flex-wrap:wrap;">
+      <!-- Expired products card -->
+      <div id="expiredCard" class="card" style="border:2px solid #795548; flex:1; min-width:260px;">
+        <h2 style="color:#795548;">🕒 Report Expired Products</h2>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+          If any products in your fridge have passed their expiry date, report them here.
+        </p>
+        <div id="expiredProductInputs"></div>
+        <button class="btn small outline" style="margin-bottom:10px;" onclick="addExpiredProductRow()">+ Add Product</button>
+        <button class="btn" style="background:#795548;" onclick="confirmExpiredEntry()">Confirm Expired Entry</button>
+        <div id="expiredConfirmedMsg" class="alert success hidden" style="margin-top:8px;">✅ Expired quantities saved. Return to the discrepancy card above to submit.</div>
+      </div>
+
+      <!-- Leaking products card -->
+      <div id="leakingCard" class="card" style="border:2px solid #1565C0; flex:1; min-width:260px;">
+        <h2 style="color:#1565C0;">💧 Report Leaking Products</h2>
+        <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">
+          If any products leaked or broke, report the affected quantity here.
+        </p>
+        <div id="leakingProductInputs"></div>
+        <button class="btn small outline" style="margin-bottom:10px;" onclick="addLeakingProductRow()">+ Add Product</button>
+        <button class="btn" style="background:#1565C0;" onclick="confirmLeakingEntry()">Confirm Leaking Entry</button>
+        <div id="leakingConfirmedMsg" class="alert success hidden" style="margin-top:8px;">✅ Leaking quantities saved. Return to the discrepancy card above to submit.</div>
+      </div>
+    </div>
+
+    <div id="lowStockCard" class="card hidden" style="border:2px solid var(--yellow); margin-top:16px;">
+      <h2 style="color:#856404;">📉 Low Stock Alert</h2>
+      <p style="font-size:0.85rem; color:var(--gray); margin-bottom:10px;">The following products are at or below the admin-set restock threshold. A restock request has been sent.</p>
+      <div id="lowStockDetails"></div>
+      <button class="btn yellow" style="margin-top:10px;" onclick="shareLowStockWhatsApp()">📲 Share via WhatsApp</button>
+    </div>
+
+    <div id="successMsg" class="alert success hidden" style="margin-top:16px;">✅ Report submitted. Stock levels updated.</div>
+  </div>
+
+</div>
+
+<div class="bottom-nav">
+  <a href="dashboard-merch.html" style="text-decoration:none; flex:1;"><div class="nav-item active"><span class="icon">🏠</span>Home</div></a>
+  <div class="nav-item active"><span class="icon">📦</span>Stock</div>
+  <a href="history.html" style="text-decoration:none; flex:1;"><div class="nav-item"><span class="icon">📋</span>History</div></a>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="shared/firebase-config.js"></script>
+<script>
+const session = getSession();
+if (!session.locationId) window.location.href = 'index.html';
+
+const today = todayStr();
+let openingStock = {};
+let suppliedStock = {};
+let thresholds = {};
+let calculatedData = null;
+let locationOffDays = [];
+let backfillQueue = [];   // array of date strings (oldest first) still needing a report
+let backfillIndex = 0;    // which one in the queue we're currently showing
+let backfillLedger = null; // { running, pending } — stock as it stood, rolled forward day by day
+let backfillDay = null;    // { date, opening, carried, received, products } for the day on screen
+let backfillProducts = []; // every product that should be listed
+let pendingSupplies = [];  // supplies the admin sent that the supplier has not confirmed yet: [{ id, items, sentDate }]
+let openingIsSuppliedTotal = false; // brand-new location: no live stock yet, so the opening IS the supplied total (it already holds the first supply)
+
+function dayOfWeekFromDateStr(dateStr) {
+  return new Date(dateStr + 'T12:00:00').getDay();
+}
+
+function dateStrMinusDays(n) {
+  return todayStr(new Date(Date.now() - n * 86400000));
+}
+
+// ===== STOCK RECONSTRUCTION FOR MISSED DAYS =====
+// Rule: a missed day's opening stock is what was really in the fridge that day =
+//   closing stock of the last real report
+// + supplies / stock adjustments that happened AFTER that report and ON OR BEFORE that day.
+// Anything delivered after the missed day does not exist yet for that day.
+// Dates use the same todayStr() convention as the daily logs, so they line up.
+
+function eventDateStr(ms) { return todayStr(new Date(ms)); }
+function endOfDateMs(dateStr) { return Date.parse(dateStr + 'T23:59:59.999Z'); }
+
+// Which day an event belongs to: the supplier-stated delivery date when there is one, otherwise the day of the event itself.
+function eventDay(e) { return e.deliveredDate || eventDateStr(e.ts); }
+
+// The real moment the stock changed on the live record: the supplier's tap for supplies, the event time for everything else.
+function eventTapMs(e) { return e.tapTs != null ? e.tapTs : e.ts; }
+
+// Which part of an event was NOT yet inside the last real report's closing count? Returns the amounts still to add.
+//  - delivered on a later day than the report            -> not in the count, add it all
+//  - delivered on an earlier day than the report         -> her count already includes it, add nothing
+//  - delivered on the SAME day as the report             -> if the supplier tapped Confirm AFTER she sent the report, add it all.
+//        If the supplier had already tapped before she sent it, look at her own report per product: when the opening she was
+//        shown did not include the supply AND her closing count did not rise by it, the bottles came after her count, so add them;
+//        otherwise they were already inside her figures.
+//  - supplies without a stated delivery date, corrections and admin adds -> compared by their exact time.
+function remainingDelta(e, log) {
+  // A report sent under the checked-opening rule: at the exact moment she sent it, her opening was proven equal to the live stock,
+  // so every supply the supplier confirmed BEFORE that moment is inside her figures and every one confirmed AFTER it is not.
+  if (!log.backfilled && log.openingVerified && log.submittedAt && log.submittedAt.toMillis) {
+    return eventTapMs(e) > log.submittedAt.toMillis() ? e.delta : {};
+  }
+  // A backfilled day used everything dated up to that day that was confirmed BEFORE it was filled in. Anything confirmed
+  // after that moment (even if dated on/before that day) is not in its figures; anything dated after that day never was.
+  if (log.backfilled && log.backfillRule === 'capped' && log.submittedAt && log.submittedAt.toMillis) {
+    if (eventDay(e) > log.date) return e.delta;
+    return eventTapMs(e) > log.submittedAt.toMillis() ? e.delta : {};
+  }
+  const cutoff = baselineCutoffMs(log);
+  if (!e.deliveredDate) return e.ts > cutoff ? e.delta : {};
+  if (e.deliveredDate > log.date) return e.delta;
+  if (e.deliveredDate < log.date) return {};
+  if (log.backfilled) return {};                       // a backfilled day already used everything dated up to that day
+  if (e.tapTs != null && e.tapTs > cutoff) return e.delta;
+  const out = {};
+  for (const [p, q] of Object.entries(e.delta)) {
+    const o = Number(log.openingStock && log.openingStock[p]) || 0;
+    const s = Number(log.soldQty && log.soldQty[p]) || 0;
+    const c = Number(log.closingStock && log.closingStock[p]) || 0;
+    const notInOpening = o < q;
+    const notInCount = c < (o - s) + q;
+    if (notInOpening && notInCount) out[p] = q;
+  }
+  return out;
+}
+
+// Everything that changed this location's stock outside of a merchandiser report:
+// supplier-confirmed supplies, admin direct adds (stored as confirmed supplies), and admin corrections.
+async function loadStockEvents() {
+  const events = [];
+
+  const supSnap = await db.collection('supplyRequests')
+    .where('locationId', '==', session.locationId)
+    .where('status', '==', 'confirmed').get();
+  supSnap.forEach(doc => {
+    const d = doc.data();
+    // Delivery date: the date the supplier stated when confirming (deliveredOn) wins. Older supplies, confirmed
+    // before that rule existed, fall back to the moment the supplier tapped; admin direct adds use the date added.
+    let ms = null, deliveredDate = null;
+    const tapT = d.confirmedAt || d.createdAt;
+    const tapTs = tapT && tapT.toMillis ? tapT.toMillis() : null;
+    if (typeof d.deliveredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.deliveredOn)) { deliveredDate = d.deliveredOn; ms = Date.parse(d.deliveredOn + 'T00:00:00Z'); }
+    else ms = tapTs;
+    if (ms == null || !d.items) return;
+    const delta = {};
+    for (const [p, q] of Object.entries(d.items)) { const n = Number(q) || 0; if (n) delta[p] = n; }
+    if (Object.keys(delta).length) events.push({ ts: ms, deliveredDate, tapTs, kind: d.addedByAdmin ? 'admin_add' : 'supply', delta });
+  });
+
+  // Admin "Edit / Correct Stock". (Direct adds are also logged here, but they are already counted
+  // above as confirmed supplies, so only corrections are taken from this collection.)
+  const adjSnap = await db.collection('stockAdjustments')
+    .where('locationId', '==', session.locationId).get();
+  adjSnap.forEach(doc => {
+    const d = doc.data();
+    if (d.type !== 'correction' || !d.createdAt || !d.createdAt.toMillis) return;
+    const delta = {};
+    const prods = new Set([...Object.keys(d.previousStock || {}), ...Object.keys(d.newStock || {})]);
+    prods.forEach(p => {
+      const diff = (Number(d.newStock && d.newStock[p]) || 0) - (Number(d.previousStock && d.previousStock[p]) || 0);
+      if (diff) delta[p] = diff;
+    });
+    if (Object.keys(delta).length) events.push({ ts: d.createdAt.toMillis(), kind: 'correction', delta });
+  });
+
+  events.sort((a, b) => a.ts - b.ts);
+  return events;
+}
+
+// Latest real (submitted/flagged) report before the oldest missed day.
+async function findBaselineLog(oldestMissedDate) {
+  const snap = await db.collection('locations').doc(session.locationId).collection('logs')
+    .where('date', '<', oldestMissedDate).orderBy('date', 'desc').limit(10).get();
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    if ((d.status === 'submitted' || d.status === 'flagged') && d.closingStock) return d;
+  }
+  return null;
+}
+
+// The moment from which later events still need adding. A live report is stamped with the exact time it was
+// sent (so a supply confirmed later that same evening still counts). A backfilled report only speaks for its
+// own calendar day, so anything dated after that day still needs adding.
+function baselineCutoffMs(log) {
+  if (!log.backfilled && log.submittedAt && log.submittedAt.toMillis) return log.submittedAt.toMillis();
+  return endOfDateMs(log.date);
+}
+
+async function buildBackfillLedger(oldestMissedDate, currentMap) {
+  const events = await loadStockEvents();
+  const baseline = await findBaselineLog(oldestMissedDate);
+  let running = {};
+  let pending = [];
+
+  if (baseline) {
+    running = { ...baseline.closingStock };
+    pending = events.map(e => { const delta = remainingDelta(e, baseline); return Object.keys(delta).length ? { ...e, delta } : null; }).filter(Boolean);
+  } else {
+    // No earlier report to anchor on (brand-new location): walk back from today's stock instead.
+    pending = events.filter(e => eventDay(e) >= oldestMissedDate);
+    const cur = { ...currentMap };
+    pending.forEach(e => { for (const [p, q] of Object.entries(e.delta)) cur[p] = (cur[p] || 0) - q; });
+    for (const p of Object.keys(cur)) running[p] = Math.max(0, cur[p]);
+  }
+  return { running, pending };
+}
+
+// Works out the fridge stock for one missed day and consumes the events dated on/before it.
+function computeBackfillDay(dateStr) {
+  const carried = { ...backfillLedger.running };
+  const received = {};
+  const later = [];
+  for (const e of backfillLedger.pending) {
+    if (eventDay(e) <= dateStr) {
+      for (const [p, q] of Object.entries(e.delta)) received[p] = (received[p] || 0) + q;
+    } else {
+      later.push(e);
+    }
+  }
+  backfillLedger.pending = later;
+
+  const products = Array.from(new Set([...backfillProducts, ...Object.keys(carried), ...Object.keys(received)]));
+  const opening = {};
+  products.forEach(p => { opening[p] = Math.max(0, (carried[p] || 0) + (received[p] || 0)); });
+  return { date: dateStr, opening, carried, received, products };
+}
+
+// ===== LIVE STOCK vs WHAT THE FORM SHOWS =====
+// The live stock only moves when the supplier taps Confirm Delivered (or the admin edits stock). So before a report is
+// accepted we re-read the live stock and make sure it is exactly what the form was opened with.
+function deriveOpening(ld) {
+  return (ld && ld.currentStock && Object.keys(ld.currentStock).length > 0) ? ld.currentStock : ((ld && ld.products) || {});
+}
+function sameStock(a, b) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  for (const k of keys) { if ((Number(a && a[k]) || 0) !== (Number(b && b[k]) || 0)) return false; }
+  return true;
+}
+function stockChangedAlert() {
+  alert('Your location\'s stock changed while this page was open (a supply was confirmed or the admin updated stock).\n\nThe page will now reload so your opening stock is correct. Please enter your figures again.');
+  window.location.reload();
+}
+
+// Supplies the admin sent that the supplier has not confirmed yet. They are not in the live stock, so they are not in the opening stock.
+async function loadPendingSupplies() {
+  const snap = await db.collection('supplyRequests')
+    .where('locationId', '==', session.locationId)
+    .where('status', '==', 'pending_confirmation').get();
+  const out = [];
+  snap.forEach(doc => {
+    const d = doc.data();
+    const items = {};
+    for (const [p, q] of Object.entries(d.items || {})) { const n = Number(q) || 0; if (n > 0) items[p] = n; }
+    if (!Object.keys(items).length) return;
+    const sent = d.createdAt && d.createdAt.toDate ? d.createdAt.toDate() : null;
+    out.push({ id: doc.id, items, sentDate: sent ? todayStr(sent) : '' });
+  });
+  out.sort((a, b) => (a.sentDate < b.sentDate ? -1 : a.sentDate > b.sentDate ? 1 : (a.id < b.id ? -1 : 1)));
+  return out;
+}
+
+function renderPendingSupplyCard() {
+  const card = document.getElementById('pendingSupplyCard');
+  if (!card) return;
+  if (!pendingSupplies.length) { card.classList.add('hidden'); return; }
+  document.getElementById('pendingSupplyList').innerHTML = pendingSupplies.map(s => {
+    const when = s.sentDate ? new Date(s.sentDate + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
+    const lines = Object.entries(s.items).map(([p, q]) => `<div class="flex-between" style="font-size:0.9rem; padding:2px 0;"><span>${sanitizeHtml(p)}</span><strong>${q}</strong></div>`).join('');
+    return `<div style="padding:8px 0; border-bottom:1px solid var(--light-gray);"><div style="font-size:0.78rem; color:var(--gray); margin-bottom:2px;">Sent by admin ${when}</div>${lines}</div>`;
+  }).join('');
+  document.getElementById('pendingSupplyAck').checked = false;
+  document.getElementById('pendingSupplyError').classList.add('hidden');
+  card.classList.remove('hidden');
+}
+function sanitizeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+
+// Shows today's form: loads any supply still waiting for the supplier, then draws the opening stock.
+async function prepareToday() {
+  try { pendingSupplies = openingIsSuppliedTotal ? [] : await loadPendingSupplies(); } catch (e) { console.error(e); pendingSupplies = []; }
+  renderPendingSupplyCard();
+  renderForms();
+}
+
+// Run when she taps Calculate & Submit, before anything is accepted.
+async function verifyBeforeSubmit() {
+  const errEl = document.getElementById('pendingSupplyError');
+  try {
+    const locSnap = await db.collection('locations').doc(session.locationId).get();
+    if (!sameStock(deriveOpening(locSnap.data() || {}), openingStock)) { stockChangedAlert(); return false; }
+
+    const fresh = openingIsSuppliedTotal ? [] : await loadPendingSupplies();
+    const sameList = fresh.length === pendingSupplies.length && fresh.every((s, i) => s.id === pendingSupplies[i].id);
+    if (!sameList) {
+      // A supply was sent or handled while this page was open — show the up-to-date list and ask again
+      pendingSupplies = fresh;
+      renderPendingSupplyCard();
+      if (fresh.length) {
+        errEl.textContent = 'A supply waiting for the supplier has changed since you opened this page. Please read the card above, then submit again.';
+        errEl.classList.remove('hidden');
+        document.getElementById('pendingSupplyCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        alert('The supplier has handled the waiting supply. Please press OK, then tap Calculate & Submit again.');
+        window.location.reload();
+      }
+      return false;
+    }
+    if (pendingSupplies.length && !document.getElementById('pendingSupplyAck').checked) {
+      errEl.textContent = 'A supply sent to you is still waiting for the supplier. Ask the supplier to tap Confirm Delivered and press Refresh — or, if it has not reached your fridge yet, tick the box above.';
+      errEl.classList.remove('hidden');
+      document.getElementById('pendingSupplyCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return false;
+    }
+    errEl.classList.add('hidden');
+    return true;
+  } catch (e) {
+    console.error(e);
+    alert('Could not check your stock. Check your connection and try again.');
+    return false;
+  }
+}
+
+async function init() {
+  try {
+    const locDoc = await db.collection('locations').doc(session.locationId).get();
+    const locationData = locDoc.data();
+
+    suppliedStock = locationData.products || {};
+    thresholds = locationData.thresholds || {};
+    locationOffDays = locationData.offDays || [];
+    openingStock = locationData.currentStock && Object.keys(locationData.currentStock).length > 0
+      ? locationData.currentStock
+      : suppliedStock;
+    openingIsSuppliedTotal = !(locationData.currentStock && Object.keys(locationData.currentStock).length > 0);
+
+    if (Object.keys(openingStock).length === 0) {
+      document.getElementById('loadingMsg').innerHTML = '<div class="alert warn">No products have been supplied to you yet by the admin.</div>';
+      return;
+    }
+
+    const logDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(today).get();
+    const logData = logDoc.exists ? logDoc.data() : {};
+
+    if (logData.status === 'submitted' || logData.status === 'flagged') {
+      document.getElementById('loadingMsg').innerHTML = '<div class="alert success">✅ You have already submitted your stock report for today. Thank you!</div>';
+      return;
+    }
+
+    // Mandatory gate: from BACKFILL_FLOOR_DATE forward, EVERY calendar day needs a sales record —
+    // including off days. The store stays open on a merchandiser's off day (someone else sells),
+    // so off days are not exempt from reporting — they just aren't logged live by her on that day.
+    // Scans backward from yesterday and collects any day with no submitted report. Stops at the
+    // first day that WAS submitted (nothing missed before that point), or at the floor date,
+    // or after 14 days back (safety limit).
+    const BACKFILL_FLOOR_DATE = '2026-08-13'; // company rule change effective date — nothing before this is checked
+    backfillQueue = [];
+    for (let n = 1; n <= 14; n++) {
+      const checkDate = dateStrMinusDays(n);
+      if (checkDate < BACKFILL_FLOOR_DATE) break; // never scan prior to the rule change
+
+      const checkLogDoc = await db.collection('locations').doc(session.locationId).collection('logs').doc(checkDate).get();
+      const wasSubmitted = checkLogDoc.exists &&
+        (checkLogDoc.data().status === 'submitted' || checkLogDoc.data().status === 'flagged');
+
+      if (wasSubmitted) break; // found a submitted day — nothing missed beyond this point
+      backfillQueue.push(checkDate);
+    }
+
+    if (backfillQueue.length > 0) {
+      backfillQueue.reverse(); // oldest missed day first
+      backfillIndex = 0;
+      // Rebuild what the fridge really held on each missed day (NOT today's stock, which already
+      // contains supplies that arrived after the missed days).
+      backfillProducts = Array.from(new Set([...Object.keys(openingStock), ...Object.keys(suppliedStock)]));
+      backfillLedger = await buildBackfillLedger(backfillQueue[0], openingStock);
+      backfillDay = null;
+      document.getElementById('backfillStatusCard').classList.add('hidden');
+      showBackfillGate();
+      return;
+    }
+
+    // Nothing missing — show the permanent status card in its greyed-out, inactive state
+    document.getElementById('backfillStatusCard').classList.remove('hidden');
+
+    await prepareToday();
+    document.getElementById('loadingMsg').classList.add('hidden');
+    document.getElementById('mainContent').classList.remove('hidden');
+  } catch(e) {
+    document.getElementById('loadingMsg').innerHTML = '<div class="alert error">Failed to load. Check your connection.</div>';
+    console.error(e);
+  }
+}
+
+function showBackfillGate() {
+  const targetDate = backfillQueue[backfillIndex];
+  const dateLabelText = new Date(targetDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const remaining = backfillQueue.length - backfillIndex;
+
+  // Work out (once per day) what was actually in the fridge on that day
+  if (!backfillDay || backfillDay.date !== targetDate) backfillDay = computeBackfillDay(targetDate);
+  const { opening, carried, received, products } = backfillDay;
+
+  ['backfillDateLabel', 'backfillDateLabel2', 'backfillDateLabel3', 'backfillDateLabel4'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = dateLabelText;
+  });
+
+  const progressEl = document.getElementById('backfillProgress');
+  if (progressEl) {
+    progressEl.textContent = remaining > 1
+      ? `Missed report ${backfillIndex + 1} of ${backfillQueue.length} — ${remaining - 1} more after this one.`
+      : `Last missed report — you'll reach today's form right after this.`;
+  }
+
+  const openingList = document.getElementById('backfillOpeningList');
+  const soldInputsEl = document.getElementById('backfillSoldInputs');
+  openingList.innerHTML = '';
+  soldInputsEl.innerHTML = '';
+
+  for (const product of products) {
+    const qty = opening[product];
+    const was = carried[product] || 0;
+    const got = received[product] || 0;
+    let breakdown = `${was} left from your last report`;
+    if (got > 0) breakdown += ` + ${got} received by ${dateLabelText}`;
+    else if (got < 0) breakdown += ` − ${Math.abs(got)} stock correction`;
+
+    openingList.innerHTML += `
+      <div class="flex-between" style="padding:6px 0; border-bottom:1px solid #ddd; font-size:0.9rem;">
+        <span>${product}<div style="font-size:0.72rem; color:var(--gray);">${breakdown}</div></span>
+        <strong style="color:${qty <= 0 ? 'var(--red)' : 'inherit'}">${qty} units</strong>
+      </div>`;
+
+    const key = sanitize(product);
+    if (qty <= 0) {
+      soldInputsEl.innerHTML += `
+        <label>${product} — units sold on ${dateLabelText}</label>
+        <input type="number" id="backfill_sold_${key}" value="0" disabled>
+        <div style="font-size:0.75rem; color:var(--red); margin:-6px 0 10px;">The fridge had none of this on ${dateLabelText}, so nothing could have been sold.</div>`;
+    } else {
+      soldInputsEl.innerHTML += `
+        <label>${product} — units sold on ${dateLabelText}</label>
+        <input type="number" min="0" max="${qty}" id="backfill_sold_${key}" placeholder="0">
+        <div style="font-size:0.75rem; color:var(--gray); margin:-6px 0 10px;">Maximum: ${qty}</div>`;
+    }
+  }
+
+  document.getElementById('loadingMsg').classList.add('hidden');
+  document.getElementById('backfillBanner').classList.remove('hidden');
+  document.getElementById('backfillError').classList.add('hidden');
+  window.scrollTo({ top: 0 });
+}
+
+async function submitBackfillReport() {
+  const targetDate = backfillQueue[backfillIndex];
+  const dateLabelText = new Date(targetDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const { opening, received, products } = backfillDay;
+  const soldQty = {};
+  const closingStock = {};
+  const errorEl = document.getElementById('backfillError');
+  errorEl.classList.add('hidden');
+
+  for (const product of products) {
+    const input = document.getElementById(`backfill_sold_${sanitize(product)}`);
+    const soldVal = input ? parseFloat(input.value) : 0;
+    if (isNaN(soldVal) || soldVal < 0) {
+      errorEl.textContent = 'Please enter a valid sold quantity (0 or more) for every product.';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    // The anti-cheat rule: you can't sell what wasn't in the fridge that day
+    if (soldVal > opening[product]) {
+      errorEl.textContent = opening[product] <= 0
+        ? `${product}: the fridge had none on ${dateLabelText}, so sold must be 0.`
+        : `${product}: you entered ${soldVal} sold, but only ${opening[product]} were in the fridge on ${dateLabelText}. Please correct it.`;
+      errorEl.classList.remove('hidden');
+      if (input) input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    soldQty[product] = soldVal;
+    closingStock[product] = opening[product] - soldVal;
+  }
+
+  const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(targetDate);
+  const locRef = db.collection('locations').doc(session.locationId);
+
+  try {
+    // One atomic step: save that day's report AND take the sold bottles off the live stock.
+    // Live stock is only reduced (never overwritten), so supplies delivered after the missed day stay intact.
+    await db.runTransaction(async (t) => {
+      const locSnap = await t.get(locRef);
+      const ld = locSnap.data() || {};
+      const live = (ld.currentStock && Object.keys(ld.currentStock).length > 0) ? { ...ld.currentStock } : { ...(ld.products || {}) };
+      for (const p of products) {
+        if (soldQty[p] > 0) live[p] = Math.max(0, (live[p] || 0) - soldQty[p]);
+      }
+      t.set(logRef, {
+        date: targetDate, locationId: session.locationId, locationName: session.locationName,
+        openingStock: opening, closingStock, soldQty,
+        suppliedBeforeDay: received,          // net supplies/adjustments counted up to that day
+        status: 'submitted', backfilled: true,
+        backfillRule: 'capped',               // marks reports made under the "can't sell more than was in the fridge" rule
+        backfilledOn: today,
+        submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      t.update(locRef, { currentStock: live });
+    });
+
+    // This day's closing is the starting point for the next missed day
+    backfillLedger.running = { ...closingStock };
+    backfillDay = null;
+
+    backfillIndex++;
+    if (backfillIndex < backfillQueue.length) {
+      // More missed days remain — show the next one in sequence
+      showBackfillGate();
+    } else {
+      // All missed days done — today's opening stock = live stock (includes supplies delivered since)
+      const fresh = await locRef.get();
+      const fd = fresh.data() || {};
+      openingStock = (fd.currentStock && Object.keys(fd.currentStock).length > 0) ? fd.currentStock : (fd.products || {});
+      openingIsSuppliedTotal = !(fd.currentStock && Object.keys(fd.currentStock).length > 0);
+      document.getElementById('backfillBanner').classList.add('hidden');
+      document.getElementById('backfillStatusCard').classList.remove('hidden');
+      await prepareToday();
+      document.getElementById('mainContent').classList.remove('hidden');
+    }
+  } catch(e) {
+    errorEl.textContent = 'Failed to submit. Check your connection and try again.';
+    errorEl.classList.remove('hidden');
+    console.error(e);
+  }
+}
+
+function getThreshold(product, supplied) {
+  return thresholds[product] != null ? thresholds[product] : Math.ceil(supplied * 0.2);
+}
+
+function renderForms() {
+  const openingList = document.getElementById('openingStockList');
+  const closingInputs = document.getElementById('closingStockInputs');
+  const soldInputsEl = document.getElementById('soldInputs');
+
+  for (const [product, qty] of Object.entries(openingStock)) {
+    const supplied = suppliedStock[product] || qty;
+    const threshold = getThreshold(product, supplied);
+    const isLow = qty <= threshold;
+
+    openingList.innerHTML += `
+      <div class="flex-between" style="padding:8px 0; border-bottom:1px solid var(--light-gray);">
+        <span>${product}</span>
+        <div style="text-align:right;">
+          <strong style="color:${isLow ? 'var(--red)' : 'inherit'}">${qty} units</strong>
+          <div style="font-size:0.75rem; color:var(--gray);">of ${supplied} supplied | threshold: ${threshold}</div>
+        </div>
+      </div>`;
+
+    closingInputs.innerHTML += `<label>${product} — units remaining</label><input type="number" min="0" id="closing_${sanitize(product)}" placeholder="0">`;
+    soldInputsEl.innerHTML += `<label>${product} — units sold</label><input type="number" min="0" id="sold_${sanitize(product)}" placeholder="0">`;
+  }
+}
+
+function sanitize(s) { return s.replace(/[^a-zA-Z0-9]/g, '_'); }
+
+let confirmTimerInterval = null;
+
+async function calculateAndSubmit() {
+  // First make sure the opening stock on screen is still the real live stock and no supply is being skipped
+  if (!(await verifyBeforeSubmit())) return;
+
+  const closingStock = {}, soldQty = {}, discrepancies = {}, lowStockItems = {};
+  let hasDiscrepancy = false;
+
+  for (const product of Object.keys(openingStock)) {
+    const key = sanitize(product);
+    const closingVal = parseFloat(document.getElementById(`closing_${key}`).value);
+    const soldVal = parseFloat(document.getElementById(`sold_${key}`).value);
+
+    if (isNaN(closingVal) || isNaN(soldVal)) {
+      alert(`Please fill in both closing stock and sold quantity for "${product}".`);
+      return;
+    }
+
+    closingStock[product] = closingVal;
+    soldQty[product] = soldVal;
+
+    const opening = openingStock[product];
+    const expectedClosing = opening - soldVal;
+    const diff = closingVal - expectedClosing;
+
+    if (diff !== 0) {
+      hasDiscrepancy = true;
+      discrepancies[product] = { opening, sold: soldVal, expectedClosing, actualClosing: closingVal, diff };
+    }
+
+    const supplied = suppliedStock[product] || opening;
+    const threshold = getThreshold(product, supplied);
+    if (closingVal <= threshold) {
+      lowStockItems[product] = {
+        opening, supplied, closing: closingVal, threshold,
+        percentRemaining: supplied > 0 ? Math.round((closingVal / supplied) * 100) : 0
+      };
+    }
+  }
+
+  calculatedData = { closingStock, soldQty, discrepancies, lowStockItems, hasDiscrepancy };
+  showConfirmCard();
+}
+
+function showConfirmCard() {
+  const { soldQty, closingStock } = calculatedData;
+  const detailsEl = document.getElementById('confirmDetails');
+  detailsEl.innerHTML = Object.keys(soldQty).map(p => `
+    <div class="flex-between" style="padding:6px 0; border-bottom:1px solid var(--light-gray); font-size:0.9rem;">
+      <span>${p}</span>
+      <span>Sold: <strong>${soldQty[p]}</strong> &nbsp;|&nbsp; Closing: <strong>${closingStock[p]}</strong></span>
+    </div>`).join('');
+
+  // Feature 2: flag any product with sold quantity above 20
+  const highQtyProducts = Object.entries(soldQty).filter(([, qty]) => qty > 20);
+  const highQtyEl = document.getElementById('highQtyConfirm');
+  const highQtyAck = document.getElementById('highQtyAck');
+  highQtyAck.checked = false;
+
+  if (highQtyProducts.length > 0) {
+    document.getElementById('highQtyList').innerHTML = highQtyProducts.map(([p,q]) => `• ${p}: <strong>${q}</strong> bottles sold`).join('<br>');
+    highQtyEl.classList.remove('hidden');
+  } else {
+    highQtyEl.classList.add('hidden');
+  }
+
+  document.getElementById('confirmCard').classList.remove('hidden');
+  document.getElementById('confirmCard').scrollIntoView({ behavior: 'smooth' });
+  startConfirmTimer();
+}
+
+// 10-second delay before the send button becomes clickable — gives her time to actually read it
+function startConfirmTimer() {
+  const btn = document.getElementById('finalSendBtn');
+  const highQtyVisible = !document.getElementById('highQtyConfirm').classList.contains('hidden');
+  let secondsLeft = 10;
+  btn.disabled = true;
+  btn.textContent = `Send Report (${secondsLeft}s)`;
+
+  if (confirmTimerInterval) clearInterval(confirmTimerInterval);
+  confirmTimerInterval = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft <= 0) {
+      clearInterval(confirmTimerInterval);
+      btn.textContent = 'Send Report';
+      // Only enable now if there's no pending high-quantity acknowledgement required
+      btn.disabled = highQtyVisible && !document.getElementById('highQtyAck').checked;
+    } else {
+      btn.textContent = `Send Report (${secondsLeft}s)`;
+    }
+  }, 1000);
+}
+
+// Feature 2: extra acknowledgement required when any product sold > 20
+function handleHighQtyAck() {
+  const btn = document.getElementById('finalSendBtn');
+  const timerRunning = confirmTimerInterval !== null && btn.textContent.includes('(');
+  if (!timerRunning) {
+    btn.disabled = !document.getElementById('highQtyAck').checked;
+  }
+}
+
+function makeCorrection() {
+  if (confirmTimerInterval) { clearInterval(confirmTimerInterval); confirmTimerInterval = null; }
+  document.getElementById('confirmCard').classList.add('hidden');
+  document.getElementById('mainContent').scrollIntoView({ behavior: 'smooth' });
+}
+
+function finalizeSend() {
+  if (confirmTimerInterval) { clearInterval(confirmTimerInterval); confirmTimerInterval = null; }
+  document.getElementById('confirmCard').classList.add('hidden');
+
+  const { discrepancies, lowStockItems, hasDiscrepancy } = calculatedData;
+  if (Object.keys(lowStockItems).length > 0) showLowStockWarning(lowStockItems);
+  if (hasDiscrepancy) {
+    showDiscrepancy(discrepancies);
+  } else {
+    saveLog('submitted', null, null, null);
+  }
+}
+
+function showLowStockWarning(items) {
+  const details = document.getElementById('lowStockDetails');
+  details.innerHTML = '';
+  for (const [product, d] of Object.entries(items)) {
+    details.innerHTML += `
+      <div class="alert warn" style="margin-bottom:8px;">
+        <strong>${product}</strong><br>
+        ${d.closing} units remaining (threshold: ${d.threshold}, ${d.percentRemaining}% of ${d.supplied} supplied).
+        <span style="color:var(--red); font-weight:700;"> Restock request sent to admin.</span>
+      </div>`;
+  }
+  document.getElementById('lowStockCard').classList.remove('hidden');
+}
+
+function showDiscrepancy(discrepancies) {
+  const details = document.getElementById('discrepancyDetails');
+  details.innerHTML = '';
+  for (const [product, d] of Object.entries(discrepancies)) {
+    const direction = d.diff > 0 ? 'more than expected' : 'missing';
+    details.innerHTML += `
+      <div class="alert warn">
+        <strong>${product}:</strong> Expected closing = ${d.expectedClosing} (Opening ${d.opening} − Sold ${d.sold}), but you entered ${d.actualClosing}.
+        That's <strong>${Math.abs(d.diff)} unit(s) ${direction}</strong>.
+      </div>`;
+  }
+  document.getElementById('discrepancyCard').classList.remove('hidden');
+  document.getElementById('discrepancyCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+function scrollToCard(id) {
+  document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+}
+
+let expiredConfirmed = null; // {product: qty} once confirmed via the Expired card, else null
+let leakingConfirmed = null; // {product: qty} once confirmed via the Leaking card, else null
+
+function handleDiscrepancyTypeChange() {
+  const type = document.getElementById('discrepancyType').value;
+  document.getElementById('expiredRedirect').classList.toggle('hidden', type !== 'expired');
+  document.getElementById('leakingRedirect').classList.toggle('hidden', type !== 'leaking');
+  document.getElementById('otherReasonInput').classList.toggle('hidden', type !== 'other');
+  document.getElementById('discrepancyBlockedMsg').classList.add('hidden');
+}
+
+async function submitWithReason() {
+  const type = document.getElementById('discrepancyType').value;
+  if (!type) { alert('Please select a reason type.'); return; }
+
+  let reason = '';
+  let expiredData = null;
+  let leakingData = null;
+  const blockedMsg = document.getElementById('discrepancyBlockedMsg');
+  blockedMsg.classList.add('hidden');
+
+  if (type === 'expired') {
+    if (!expiredConfirmed || Object.keys(expiredConfirmed).length === 0) {
+      blockedMsg.textContent = '⚠️ Please confirm your expired product quantities in the card below before submitting.';
+      blockedMsg.classList.remove('hidden');
+      scrollToCard('expiredCard');
+      return;
+    }
+    expiredData = expiredConfirmed;
+    reason = 'Expired: ' + Object.entries(expiredData).map(([p,q]) => q + ' ' + p).join(', ');
+  } else if (type === 'leaking') {
+    if (!leakingConfirmed || Object.keys(leakingConfirmed).length === 0) {
+      blockedMsg.textContent = '⚠️ Please confirm your leaking product quantities in the card below before submitting.';
+      blockedMsg.classList.remove('hidden');
+      scrollToCard('leakingCard');
+      return;
+    }
+    leakingData = leakingConfirmed;
+    reason = 'Leaking: ' + Object.entries(leakingData).map(([p,q]) => q + ' ' + p).join(', ');
+  } else {
+    reason = document.getElementById('discrepancyReason').value.trim();
+    if (!reason) { alert('Please provide a reason.'); return; }
+  }
+
+  const notes = document.getElementById('discrepancyNotes').value.trim();
+  const fullReason = notes ? reason + ' | Notes: ' + notes : reason;
+
+  const saved = await saveLog('flagged', fullReason, expiredData, leakingData);
+  if (saved) await sendDiscrepancyNotification(fullReason, expiredData, leakingData);
+}
+
+async function sendDiscrepancyNotification(reason, expired, leaking) {
+  const payload = {
+    type: 'discrepancy', locationId: session.locationId, locationName: session.locationName,
+    date: today, reason, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if (expired) payload.expiry = expired;
+  if (leaking) payload.leakage = leaking;
+  await db.collection('notifications').add(payload);
+}
+
+async function saveLog(status, discrepancyReason, expiredData, leakingData) {
+  const { closingStock, soldQty, discrepancies, lowStockItems } = calculatedData;
+  const logRef = db.collection('locations').doc(session.locationId).collection('logs').doc(today);
+  const locRef = db.collection('locations').doc(session.locationId);
+  const payload = {
+    date: today, locationId: session.locationId, locationName: session.locationName,
+    openingStock, closingStock, soldQty, discrepancy: discrepancies,
+    discrepancyReason: discrepancyReason || '', lowStockItems,
+    hasLowStock: Object.keys(lowStockItems).length > 0, status,
+    openingVerified: true,                                   // opening was proven equal to the live stock at the moment of sending
+    pendingSupplyIds: pendingSupplies.map(s => s.id),        // supplies she confirmed had NOT reached her yet (still waiting for the supplier)
+    submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if (expiredData) payload.expiry = expiredData;
+  if (leakingData) payload.leakage = leakingData;
+  try {
+    // One atomic step: re-check the live stock, save the report and set the new live stock.
+    // If the supplier confirmed a delivery (or the admin changed stock) after this page was opened, nothing is saved.
+    await db.runTransaction(async (t) => {
+      const locSnap = await t.get(locRef);
+      if (!sameStock(deriveOpening(locSnap.data() || {}), openingStock)) throw new Error('STOCK_CHANGED');
+      t.set(logRef, payload, { merge: true });
+      t.update(locRef, { currentStock: closingStock });
+    });
+    if (Object.keys(lowStockItems).length > 0) await sendLowStockNotification(lowStockItems);
+    document.getElementById('discrepancyCard').classList.add('hidden');
+    document.getElementById('successMsg').classList.remove('hidden');
+    document.getElementById('successMsg').scrollIntoView({ behavior: 'smooth' });
+    document.querySelectorAll('input, textarea, button, select').forEach(el => el.disabled = true);
+    return true;
+  } catch (e) {
+    if (e && e.message === 'STOCK_CHANGED') { stockChangedAlert(); return false; }
+    alert('Failed to submit. Check your connection and try again.');
+    console.error(e);
+    return false;
+  }
+}
+
+async function sendLowStockNotification(lowStockItems) {
+  await db.collection('notifications').add({
+    type: 'low_stock', locationId: session.locationId, locationName: session.locationName,
+    date: today, lowStockItems, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function shareLowStockWhatsApp() {
+  const settingsDoc = await db.collection('admin').doc('settings').get();
+  const number = settingsDoc.exists ? (settingsDoc.data().whatsappNumber || '') : '';
+  const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  let text = `*ITHRI FRESH JUICE — LOW STOCK ALERT*\n📅 ${date}\n📍 ${session.locationName}\n\n`;
+  for (const [product, d] of Object.entries(calculatedData.lowStockItems)) {
+    text += `• ${product}: ${d.closing} units left (threshold ${d.threshold}, ${d.percentRemaining}% of ${d.supplied} supplied)\n`;
+  }
+  text += '\n_Please arrange restock at your earliest convenience._';
+  const url = number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
+}
+
+// ===== EXPIRED PRODUCTS CARD =====
+function buildProductRow(container) {
+  const products = Object.keys(openingStock);
+  if (products.length > 0) {
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:8px; align-items:center;">
+        <select style="flex:2; margin-bottom:0; padding:10px; border:1px solid #ddd; border-radius:8px;">
+          ${products.map(p => `<option value="${p}">${p}</option>`).join('')}
+        </select>
+        <input type="number" min="0" value="0" placeholder="Qty" style="flex:1; margin-bottom:0; margin-left:8px;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  } else {
+    container.innerHTML += `
+      <div class="flex" style="margin-bottom:8px; align-items:center;">
+        <input type="text" placeholder="Product name" style="flex:2; margin-bottom:0;">
+        <input type="number" min="0" value="0" placeholder="Qty" style="flex:1; margin-bottom:0; margin-left:8px;">
+        <button class="btn small danger" style="margin-left:8px;" onclick="this.closest('.flex').remove()">✕</button>
+      </div>`;
+  }
+}
+
+function readProductRows(container) {
+  const rows = container.querySelectorAll('.flex');
+  const result = {};
+  rows.forEach(row => {
+    const sel = row.querySelector('select');
+    const textInput = row.querySelector('input[type="text"]');
+    const numInput = row.querySelector('input[type="number"]');
+    const productName = sel ? sel.value : (textInput ? textInput.value.trim() : '');
+    const qty = parseFloat(numInput?.value) || 0;
+    if (productName && qty > 0) result[productName] = qty;
+  });
+  return result;
+}
+
+function addExpiredProductRow() {
+  buildProductRow(document.getElementById('expiredProductInputs'));
+}
+
+function confirmExpiredEntry() {
+  const container = document.getElementById('expiredProductInputs');
+  const items = readProductRows(container);
+  if (Object.keys(items).length === 0) { alert('Please enter at least one quantity greater than 0.'); return; }
+  expiredConfirmed = items;
+  document.getElementById('expiredConfirmedMsg').classList.remove('hidden');
+  document.getElementById('discrepancyBlockedMsg').classList.add('hidden');
+}
+
+// ===== LEAKING PRODUCTS CARD =====
+function addLeakingProductRow() {
+  buildProductRow(document.getElementById('leakingProductInputs'));
+}
+
+function confirmLeakingEntry() {
+  const container = document.getElementById('leakingProductInputs');
+  const items = readProductRows(container);
+  if (Object.keys(items).length === 0) { alert('Please enter at least one quantity greater than 0.'); return; }
+  leakingConfirmed = items;
+  document.getElementById('leakingConfirmedMsg').classList.remove('hidden');
+  document.getElementById('discrepancyBlockedMsg').classList.add('hidden');
+}
+
+init();
+</script>
+</body>
+</html>
